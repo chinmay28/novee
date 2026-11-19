@@ -215,6 +215,8 @@ def main():
     ap.add_argument("--drive", help="only this drive (name, label, model or mount path, substring match)")
     ap.add_argument("--selftest", metavar="short[:sdX]",
                     help="start a SMART short self-test (non-destructive, ~2 min). ONLY when Chinmay asked for a test.")
+    ap.add_argument("--all-drives", action="store_true",
+                    help="with --selftest short: test every drive instead of one named drive. ONLY if Chinmay asked for all drives.")
     ap.add_argument("--read-sample", action="store_true",
                     help="time small reads from each disk (spins drives up). ONLY when Chinmay asked for a test.")
     ap.add_argument("--brief", action="store_true", help="skip kernel log sample lines")
@@ -223,6 +225,10 @@ def main():
     a = ap.parse_args()
     args = ["report", "--hours", str(max(1, min(a.hours, 720)))]
     if a.selftest:
+        if ":" not in a.selftest and not a.all_drives:
+            sys.exit("ERROR: name the drive to test, for example --selftest short:HP1TB or --selftest short:Elements "
+                     "(label, mount folder name or device name). Add --all-drives only if Chinmay asked to test every drive. "
+                     "Nothing was started.")
         args += ["--selftest", a.selftest]
     if a.read_sample:
         args += ["--read-sample"]
