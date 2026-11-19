@@ -537,8 +537,12 @@ def cmd_status(_):
         active = "ActiveState=active" in p.stdout
         nxt = subprocess.run(["systemctl", "--user", "list-timers", "novee-sync.timer", "--no-legend",
                               "--no-pager"], capture_output=True, text=True, timeout=10).stdout.split()
-        when = " ".join(nxt[:3]) if active and nxt else ""
-        say("- automatic sync every 8 hours: " + (f"on, next run {when}" if active else "OFF (timer not active)"))
+        if not active:
+            say("- automatic sync every 8 hours: OFF (timer not active)")
+        elif not nxt or nxt[0] in ("-", "n/a"):
+            say("- automatic sync every 8 hours: on (running now or just started)")
+        else:
+            say(f"- automatic sync every 8 hours: on, next run {' '.join(nxt[:3])}")
     except (OSError, subprocess.TimeoutExpired):
         pass
     return 0
