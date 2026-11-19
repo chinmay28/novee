@@ -34,3 +34,4 @@ A short log of how Novee was built. Dates are 2026.
 
 - Wrote the `gpu-stats` skill after the question "my GPU fans are spinning, what is using it". The GPU is in the host PC, so the host exposes one read-only report script through an SSH key that can run nothing else.
 - Created this repository, moved the workspace into it, and wrote `repo-sync` with a privacy check and the rule that GitHub wins a conflict.
+- Novee got a deploy key for this repository and made its first push from the VM.
