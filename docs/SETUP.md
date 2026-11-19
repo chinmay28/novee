@@ -78,6 +78,22 @@ On the VM: `ssh-keygen -t ed25519 -N "" -f ~/.ssh/vbox-manage`, add the host to 
 
 `config/exec-approvals.json` is the policy that lets Novee run skill scripts and read-only commands freely and asks the owner for everything else. Apply it with `openclaw approvals set --file config/exec-approvals.json`. It is not applied automatically by a pull, on purpose: a change to the repository must not be able to widen what the agent may run.
 
+## 7. disk-health
+
+Same pattern as gpu-stats: the drives are on the host PC, which offers one read-only report command.
+
+On the host PC:
+
+```bash
+install -m 755 skills/disk-health/host/novee-disk-report ~/.local/bin/novee-disk-report
+# one line in ~/.ssh/authorized_keys, with the VM's address and the public key from the VM:
+restrict,from="VM_ADDRESS",command="/home/USER/.local/bin/novee-disk-report" ssh-ed25519 AAAA... novee-disk-health
+```
+
+The report runs `smartctl`, `tune2fs -l` and `lsusb -v` through `sudo -n`, so the host user needs passwordless sudo for those (or for everything, as on Novee's host). Without it the report still works but shows SMART and ext4 details as unavailable. The script accepts only `--hours N`, `--selftest short[:sdX]` and `--read-sample`; anything else is rejected, so the key cannot be used for anything but the report.
+
+On the VM: `ssh-keygen -t ed25519 -N "" -f ~/.ssh/disk-health`, make sure the host's key is in `~/.ssh/known_hosts`, and copy `examples/disk-health.example.json` to `~/.config/novee/disk-health.json` with the real address. On the host PC itself `scripts/diskhealth.py` runs without a config and uses the local `~/.local/bin/novee-disk-report`.
+
 ## Tests
 
 ```bash

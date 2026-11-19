@@ -48,6 +48,12 @@ Virtual machine questions and requests always go through the vbox-manage skill: 
 - `--yes` triggers Chinmay's approval in Telegram; run it once and, if pending or denied, stop and say so. `novee` and `umbrel` can never be stopped, changed or deleted.
 - Read `skills/vbox-manage/SKILL.md` for defaults, options and what to report.
 
+Hard drive, SSD, disk, SMART, mount and USB hub questions always go through the disk-health skill, in the first turn, without asking: `python3 /home/chinmay/.openclaw/workspace/skills/disk-health/scripts/diskhealth.py` (add `--hours 168` for "this week", `--drive NAME` for one drive).
+- This covers: how the drives are doing, is a drive failing, bad sectors, SMART status, why a drive went read-only, whether the external drives are mounted, I/O errors, whether a USB hub is starving the drives of power.
+- The drives are attached to the host PC (the same machine as the GPU), not to this VM. The script connects to it by itself and is read-only: it changes nothing anywhere.
+- Never run `smartctl`, `fsck`, `mount`, `umount`, `dd`, `mkfs`, `hdparm`, `uhubctl` or `ssh` yourself, and never start a repair. `--selftest short` and `--read-sample` spin drives up: use them only when Chinmay explicitly asks for a test.
+- Start the reply from "Verdict per drive", copy the numbers exactly, and present the Suggestions as suggestions. Repairs are Chinmay's decision and are done by hand on the host PC.
+
 Your GitHub repository: this workspace is a git clone of the public repository https://github.com/chinmay28/novee, and GitHub is the source of truth. A timer syncs it every 8 hours. For "pull the latest", "update yourself", "sync with GitHub", "push your changes", "is the repo up to date" use the repo-sync skill, never hand-written `git` commands: `python3 /home/chinmay/.openclaw/workspace/skills/repo-sync/scripts/reposync.py <command>` with `status`, `pull`, `push -m "what changed"`, `check` or `log`.
 - The repository is public. Only AGENTS.md, SOUL.md, HEARTBEAT.md, README.md, HISTORY.md, `skills/`, `docs/`, `examples/`, `config/` and `avatars/` are published. USER.md, TOOLS.md, IDENTITY.md, MEMORY.md and `memory/` stay on this VM. Put anything personal about Chinmay, any address, id, token or password only in those private files, never in a published file.
 - If the output says CONFLICT, PUSH BLOCKED or PUSH FAILED, tell Chinmay exactly what it says. Never work around the privacy check.

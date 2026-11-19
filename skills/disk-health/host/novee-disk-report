@@ -1,0 +1,764 @@
+#!/usr/bin/env python3
+"""Read-only disk and USB-hub diagnostics for the novee VM (host-side SSH forced command).
+
+Prints ONE JSON object describing every disk on this machine: block layout,
+USB path (hub chain, link speed, driver, power descriptors, port over-current
+counters, link power management), SMART health, ext4 state, fstab and mount
+status, and a per-device digest of the kernel log. It then derives verdicts
+("failing media", "link or power trouble", "shared hub problem", ...) and
+plain-language suggestions.
+
+Everything here is read-only. The two opt-in actions, a SMART short self-test
+(--selftest) and a timed read sample (--read-sample), are non-destructive but
+spin drives up and add load, so they run only when asked for explicitly.
+Nothing here ever writes to a disk, runs fsck, formats, unmounts, rebinds a
+driver or power-cycles a port.
+
+Arguments come from SSH_ORIGINAL_COMMAND (forced command) or argv:
+  --hours N              kernel-log window in hours (1-720, default 24)
+  --selftest short[:NAME]   start a SMART short self-test on every drive, or on
+                         kernel device NAME only (e.g. sde). Result shows up in
+                         the self-test log of a later report (2-3 minutes).
+  --read-sample          read 1 MiB at four offsets of each disk and time it
+Anything else is rejected.
+"""
+import glob, json, os, re, shlex, subprocess, sys, threading, time
+from datetime import datetime, timedelta
+
+SUDO = ["sudo", "-n"]
+ERRORS = []
+
+
+def run(cmd, timeout=60, sudo=False):
+    full = (SUDO + cmd) if sudo else cmd
+    try:
+        p = subprocess.run(full, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout, p.stderr.strip()
+    except FileNotFoundError:
+        return 127, "", f"{cmd[0]}: not installed"
+    except subprocess.TimeoutExpired:
+        return 124, "", f"{' '.join(cmd[:2])}: no answer within {timeout} s"
+    except OSError as e:
+        return 1, "", str(e)
+
+
+def readf(path, default=None):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
+def parse_args():
+    raw = os.environ.get("SSH_ORIGINAL_COMMAND")
+    argv = shlex.split(raw) if raw else sys.argv[1:]
+    opts = {"hours": 24, "selftest": None, "read_sample": False}
+    if argv and argv[0] == "report":        # the VM sends "report ..." so ssh never sees a leading "--option"
+        argv = argv[1:]
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--hours" and i + 1 < len(argv) and re.fullmatch(r"\d{1,3}", argv[i + 1]):
+            opts["hours"] = max(1, min(int(argv[i + 1]), 720)); i += 2
+        elif a.startswith("--hours=") and re.fullmatch(r"\d{1,3}", a[8:]):
+            opts["hours"] = max(1, min(int(a[8:]), 720)); i += 1
+        elif a == "--selftest" and i + 1 < len(argv) and re.fullmatch(r"short(:[a-z]{2,3}[a-z0-9]{0,2})?", argv[i + 1]):
+            opts["selftest"] = argv[i + 1]; i += 2
+        elif a == "--read-sample":
+            opts["read_sample"] = True; i += 1
+        else:
+            print(json.dumps({"error": f"unsupported argument: {a!r}. Allowed: --hours N, --selftest short[:sdX], --read-sample"}))
+            sys.exit(2)
+    return opts
+
+
+# ---------------------------------------------------------------- block devices
+LSBLK_COLS = "NAME,KNAME,PATH,SIZE,TYPE,TRAN,MODEL,VENDOR,ROTA,STATE,RM,HOTPLUG,FSTYPE,UUID,LABEL,MOUNTPOINT,FSUSE%,FSSIZE,FSAVAIL,PTTYPE,SUBSYSTEMS"
+
+
+def block_devices():
+    rc, out, err = run(["lsblk", "-J", "-b", "-o", LSBLK_COLS])
+    if rc:
+        ERRORS.append("lsblk: " + err)
+        return []
+    disks = []
+    for d in json.loads(out).get("blockdevices", []):
+        if d.get("type") != "disk" or d["name"].startswith(("loop", "zram", "sr", "ram")):
+            continue
+        disks.append(d)
+    return disks
+
+
+def human(nbytes):
+    try:
+        n = float(nbytes)
+    except (TypeError, ValueError):
+        return None
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if n < 1000 or unit == "TB":
+            return f"{n:.1f} {unit}" if unit != "B" else f"{int(n)} B"
+        n /= 1000
+
+
+# ---------------------------------------------------------------- USB topology
+def usb_device_dir(kname):
+    """Walk up from /sys/block/<kname>/device until a directory with idVendor (the USB device)."""
+    p = os.path.realpath(f"/sys/block/{kname}/device")
+    for _ in range(12):
+        if os.path.exists(os.path.join(p, "idVendor")):
+            return p
+        p = os.path.dirname(p)
+        if p in ("/", "/sys"):
+            break
+    return None
+
+
+HUB_DESC_CACHE = {}
+
+
+def hub_descriptor(devdir):
+    """Power-switching facts from the hub descriptor (needs root for the full descriptor)."""
+    key = devdir
+    if key in HUB_DESC_CACHE:
+        return HUB_DESC_CACHE[key]
+    info = {"power_switching": None, "self_powered_claim": None, "hub_controller_ma": None, "descriptor_error": None}
+    bus, dev = readf(f"{devdir}/busnum"), readf(f"{devdir}/devnum")
+    if bus and dev:
+        rc, out, err = run(["lsusb", "-v", "-s", f"{bus}:{dev}"], timeout=20, sudo=True)
+        if "can't get hub descriptor" in out + err or "cannot read device status" in out + err:
+            info["descriptor_error"] = "hub did not answer descriptor requests (timeout): the hub itself is misbehaving"
+        if rc == 0:
+            if "Ganged power switching" in out:
+                info["power_switching"] = "ganged (one switch for all ports; a per-port off does not cut power)"
+            elif "Per-port power switching" in out:
+                info["power_switching"] = "per-port"
+            elif "No power switching" in out:
+                info["power_switching"] = "none (ports always powered)"
+            info["self_powered_claim"] = "Self Powered" in out
+            m = re.search(r"bHubContrCurrent\s+(\d+)", out)
+            if m:
+                info["hub_controller_ma"] = int(m.group(1))
+    HUB_DESC_CACHE[key] = info
+    return info
+
+
+def port_dir(parent_devdir, portnum):
+    """sysfs directory of port <portnum> on hub <parent_devdir> (root hubs are usbN)."""
+    parent = os.path.basename(parent_devdir)
+    if parent.startswith("usb"):
+        bus = parent[3:]
+        return f"{parent_devdir}/{bus}-0:1.0/usb{bus}-port{portnum}"
+    return f"{parent_devdir}/{parent}:1.0/{parent}-port{portnum}"
+
+
+def port_info(parent_devdir, portnum):
+    pd = port_dir(parent_devdir, portnum)
+    if not os.path.isdir(pd):
+        return None
+    oc = readf(f"{pd}/over_current_count")
+    return {"port": portnum, "state": readf(f"{pd}/state"),
+            "over_current_count": int(oc) if oc and oc.isdigit() else None,
+            "usb3_lpm_permit": readf(f"{pd}/usb3_lpm_permit")}
+
+
+def usb_info(kname):
+    devdir = usb_device_dir(kname)
+    if not devdir:
+        return None
+    devpath = os.path.basename(devdir)                  # e.g. 2-6.2.4
+    iface = glob.glob(f"{devdir}/{devpath}:1.*")
+    driver = None
+    for i in iface:
+        d = os.path.join(i, "driver")
+        if os.path.islink(d):
+            driver = os.path.basename(os.path.realpath(d)); break
+    attrs = readf(f"{devdir}/bmAttributes")
+    maxpower = readf(f"{devdir}/bMaxPower") or ""
+    speed = readf(f"{devdir}/speed")
+    info = {
+        "devpath": devpath,
+        "id": f"{readf(f'{devdir}/idVendor')}:{readf(f'{devdir}/idProduct')}",
+        "manufacturer": readf(f"{devdir}/manufacturer"), "product": readf(f"{devdir}/product"),
+        "speed_mbps": int(speed) if speed and speed.isdigit() else None,
+        "driver": driver,
+        "bMaxPower_ma": int(maxpower.rstrip("mA")) if maxpower.rstrip("mA").isdigit() else None,
+        "claims_self_powered": (int(attrs, 16) & 0x40 != 0) if attrs else None,
+        "autosuspend": readf(f"{devdir}/power/control"),
+        "runtime_status": readf(f"{devdir}/power/runtime_status"),
+        "lpm_u1": readf(f"{devdir}/power/usb3_hardware_lpm_u1"),
+        "lpm_u2": readf(f"{devdir}/power/usb3_hardware_lpm_u2"),
+        "hub_chain": [],
+    }
+    # Walk up through hubs to the root hub, recording the port we hang off at each level.
+    child = devdir
+    while True:
+        parent = os.path.dirname(child)
+        if not os.path.exists(os.path.join(parent, "idVendor")):
+            break
+        cname = os.path.basename(child)
+        portnum = int(cname.rsplit(".", 1)[-1].split("-")[-1]) if "." in cname else int(cname.split("-")[1])
+        pname = os.path.basename(parent)
+        hub = {"devpath": pname, "root_hub": pname.startswith("usb"),
+               "id": f"{readf(f'{parent}/idVendor')}:{readf(f'{parent}/idProduct')}",
+               "product": readf(f"{parent}/product"), "manufacturer": readf(f"{parent}/manufacturer"),
+               "speed_mbps": int(readf(f"{parent}/speed") or 0) or None,
+               "ports": int(readf(f"{parent}/maxchild") or 0) or None,
+               "lpm_u1": readf(f"{parent}/power/usb3_hardware_lpm_u1"),
+               "lpm_u2": readf(f"{parent}/power/usb3_hardware_lpm_u2"),
+               "our_port": port_info(parent, portnum)}
+        if not hub["root_hub"]:
+            hub.update(hub_descriptor(parent))
+        info["hub_chain"].append(hub)
+        child = parent
+    info["on_external_hub"] = any(not h["root_hub"] for h in info["hub_chain"])
+    return info
+
+
+# ---------------------------------------------------------------- SMART
+ATTR_NAMES = {1: "raw_read_error_rate", 5: "reallocated_sectors", 7: "seek_error_rate", 9: "power_on_hours",
+              12: "power_cycles", 187: "reported_uncorrectable", 188: "command_timeouts",
+              190: "airflow_temp", 192: "power_off_retracts", 193: "load_cycles", 194: "temperature",
+              196: "reallocation_events", 197: "pending_sectors", 198: "offline_uncorrectable",
+              199: "udma_crc_errors", 200: "multi_zone_errors"}
+
+
+def raw_leading(raw):
+    """smartctl's raw.string starts with the meaningful number ("8453 (31 99 0)"); raw.value packs several fields."""
+    m = re.match(r"\s*(\d+)", str(raw.get("string", "")))
+    if m:
+        return int(m.group(1))
+    v = raw.get("value")
+    return v if isinstance(v, int) else None
+
+
+def smartctl_json(dev, extra):
+    rc, out, err = run(["smartctl", "-j", "-n", "standby", "-H", "-A", "-l", "selftest", "-l", "error"] + extra + [dev],
+                       timeout=90, sudo=True)
+    try:
+        data = json.loads(out) if out.strip() else {}
+    except ValueError:
+        data = {}
+    return rc, data, err
+
+
+def smart(dev, tran):
+    """SMART via -j; falls back through device types for USB bridges that block ATA pass-through."""
+    tried = []
+    for extra in ([], ["-d", "sat"], ["-d", "scsi"]):
+        rc, data, err = smartctl_json(dev, extra)
+        tried.append((extra, rc))
+        msgs = [m.get("string", "") for m in data.get("smartctl", {}).get("messages", [])]
+        pm = data.get("power_mode") or {}
+        asleep = rc & 2 and any("STANDBY" in m or "SLEEP" in m for m in msgs)
+        if asleep and pm.get("ata_value", -1) >= 0:            # a real CHECK POWER MODE answer: leave it asleep
+            return {"skipped": f"drive is in {pm.get('name', 'standby').lower()} (spun down); left asleep on purpose",
+                    "power_mode": pm.get("name", "STANDBY").lower()}
+        if asleep:                                              # ata_value -1: the USB bridge cannot answer; not trustworthy
+            continue
+        if rc & 3 and not (data.get("smart_status") or data.get("ata_smart_attributes")):
+            continue                                               # open/command failure: next device type
+        res = {"device_type": data.get("device", {}).get("type"),
+               "passed": (data.get("smart_status") or {}).get("passed"),
+               "temperature_c": (data.get("temperature") or {}).get("current") or None,
+               "power_on_hours": (data.get("power_on_time") or {}).get("hours"),
+               "power_cycles": data.get("power_cycle_count"),
+               "attributes": {}, "self_tests": [], "exit_status": rc, "flags": []}
+        for a in (data.get("ata_smart_attributes") or {}).get("table", []):
+            if a["id"] in ATTR_NAMES:
+                res["attributes"][ATTR_NAMES[a["id"]]] = {"raw": raw_leading(a.get("raw", {})),
+                                                           "value": a.get("value"), "worst": a.get("worst"),
+                                                           "thresh": a.get("thresh"),
+                                                           "failing": a.get("when_failed", "") != ""}
+        nv = data.get("nvme_smart_health_information_log")
+        if nv:
+            res["nvme"] = {k: nv.get(k) for k in ("critical_warning", "percentage_used", "media_errors",
+                                                  "unsafe_shutdowns", "power_cycles", "power_on_hours",
+                                                  "num_err_log_entries")}
+        for t in ((data.get("ata_smart_self_test_log") or {}).get("standard") or {}).get("table", [])[:3]:
+            res["self_tests"].append({"type": t.get("type", {}).get("string"),
+                                      "status": t.get("status", {}).get("string"),
+                                      "passed": t.get("status", {}).get("passed"),
+                                      "at_power_on_hours": t.get("lifetime_hours"),
+                                      "failing_lba": t.get("lba")})
+        ec = (data.get("ata_smart_error_log") or {}).get("summary", {}).get("count")
+        if ec is not None:
+            res["ata_error_log_count"] = ec
+        if data.get("ata_smart_data", {}).get("self_test", {}).get("status", {}).get("remaining_percent") is not None:
+            res["self_test_running_pct_left"] = data["ata_smart_data"]["self_test"]["status"]["remaining_percent"]
+        if extra:
+            res["flags"].append(f"needed smartctl {' '.join(extra)}")
+        if extra == ["-d", "scsi"]:
+            res["flags"].append("USB bridge blocks ATA pass-through: only the bridge's overall health answer is visible, no attributes or self-test log")
+        if res["passed"] is None and not res["attributes"]:
+            continue
+        return res
+    return {"unavailable": err or f"smartctl failed (tried {', '.join(' '.join(t[0]) or 'auto' for t in tried)})"}
+
+
+# ---------------------------------------------------------------- filesystems, fstab, mounts
+def tune2fs(dev):
+    rc, out, err = run(["tune2fs", "-l", dev], timeout=30, sudo=True)
+    if rc:
+        return {"unavailable": err or "tune2fs failed"}
+    kv = {}
+    for line in out.splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            kv[k.strip()] = v.strip()
+    res = {"state": kv.get("Filesystem state"), "errors_behavior": kv.get("Errors behavior"),
+           "error_count": int(kv["FS Error count"]) if kv.get("FS Error count", "").isdigit() else 0,
+           "mount_count": kv.get("Mount count"), "last_checked": kv.get("Last checked")}
+    if res["error_count"]:
+        res["first_error"] = {"time": kv.get("First error time"), "function": kv.get("First error function"),
+                              "block": kv.get("First error block #"), "inode": kv.get("First error inode #")}
+        res["last_error"] = {"time": kv.get("Last error time"), "function": kv.get("Last error function"),
+                             "block": kv.get("Last error block #"), "inode": kv.get("Last error inode #"),
+                             "errno": kv.get("Last error err")}
+    return res
+
+
+def mounts():
+    rc, out, err = run(["findmnt", "-J", "-o", "TARGET,SOURCE,FSTYPE,OPTIONS"])
+    res = {}
+    if rc:
+        ERRORS.append("findmnt: " + err); return res
+
+    def walk(nodes):
+        for n in nodes:
+            res[n["source"]] = {"target": n["target"], "fstype": n["fstype"], "options": n["options"]}
+            walk(n.get("children", []))
+    walk(json.loads(out).get("filesystems", []))
+    return res
+
+
+def fstab():
+    entries = []
+    for line in (readf("/etc/fstab") or "").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = s.split()
+        if len(parts) < 4:
+            continue
+        spec, target, fstype, opts = parts[:4]
+        passno = parts[5] if len(parts) > 5 else "0"
+        if fstype in ("swap", "proc", "sysfs", "tmpfs") or target in ("/", "/boot/efi", "none"):
+            continue
+        e = {"spec": spec, "target": target, "fstype": fstype, "options": opts, "fsck_pass": passno,
+             "nofail": "nofail" in opts}
+        if spec.startswith("UUID="):
+            e["uuid"] = spec[5:]
+        elif spec.startswith("LABEL="):
+            e["label"] = spec[6:]
+        entries.append(e)
+    return entries
+
+
+def mount_units(targets):
+    rc, out, err = run(["systemctl", "list-units", "--all", "--plain", "--no-legend", "-t", "mount"], timeout=20)
+    units = {}
+    if rc:
+        return units
+    for line in out.splitlines():
+        parts = line.split(None, 4)
+        if len(parts) >= 4:
+            units[parts[0]] = {"load": parts[1], "active": parts[2], "sub": parts[3]}
+    rc, out, err = run(["systemctl", "--failed", "--plain", "--no-legend"], timeout=20)
+    failed = [l.split()[0] for l in out.splitlines() if l.strip()] if not rc else []
+    res = {}
+    for t in targets:
+        rc2, name, _ = run(["systemd-escape", "-p", "--suffix=mount", t], timeout=10)
+        name = name.strip()
+        if name in units:
+            res[t] = units[name]
+    return res, [f for f in failed if "fsck" in f or ".mount" in f or "disk" in f]
+
+
+# ---------------------------------------------------------------- kernel log digest
+PATTERNS = [
+    ("medium_error", re.compile(r"Medium Error|critical medium error|Unrecovered read error|unable to read itable|Add\. Sense: Unrecovered")),
+    ("hardware_error", re.compile(r"Sense Key : Hardware Error|critical target error|Internal target failure")),
+    ("not_ready", re.compile(r"becoming ready|Sense Key : Not Ready|not responding\.\.\.|Test WP failed|Read Capacity\(10\) failed|\] 0 512-byte logical blocks")),
+    ("timeout", re.compile(r"timing out command|DID_TIME_OUT|cmd_age=\d+s|uas_eh_abort_handler")),
+    ("usb_reset", re.compile(r"reset (SuperSpeed|high-speed|full-speed) USB device|uas_eh_device_reset_handler|Synchronize Cache\(10\) failed")),
+    ("link_crc", re.compile(r"iuCRC|CRC error detected|Information unit iuCRC")),
+    ("io_error", re.compile(r"I/O error, dev|Buffer I/O error|blk_update_request: I/O error")),
+    ("offline", re.compile(r"device offline error|rejecting I/O to offline device|Device offlined")),
+    ("ext4_error", re.compile(r"EXT4-fs error|EXT4-fs warning|JBD2: I/O error|error count since last fsck")),
+    ("remount_ro", re.compile(r"Remounting filesystem read-only|emergency_ro|shut down requested|ext4_handle_error|Aborting journal")),
+    ("enumeration", re.compile(r"device descriptor read|device not accepting address|unable to enumerate|over-current|Cannot enable\. Maybe the USB cable is bad")),
+    ("disconnect", re.compile(r"USB disconnect")),
+    ("xhci", re.compile(r"xhci_hcd .*(Timeout|timed out|error|WARN|died|halted)", re.I)),
+]
+DEV_RE = re.compile(r"\b(sd[a-z]{1,2}|nvme\d+n\d+|sr\d)\b")
+USB_RE = re.compile(r"\busb (\d+-[\d.]+)")
+SCSI_HOST_RE = re.compile(r"\bsd (\d+):\d+:\d+:\d+: \[(sd[a-z]{1,2})\]")
+
+
+def kernel_digest(hours, disks):
+    rc, out, err = run(["journalctl", "-k", "--since", f"-{hours}h", "-o", "short-iso", "--no-pager", "-q"], timeout=90)
+    if rc and not out:
+        ERRORS.append("journalctl -k: " + err)
+        return {}, {}
+    usb_to_disk = {}
+    for d in disks:
+        u = d.get("usb")
+        if u:
+            usb_to_disk[u["devpath"]] = d["name"]
+            for h in u["hub_chain"]:
+                usb_to_disk.setdefault(h["devpath"], "hub " + h["devpath"])
+    per = {}
+    glob_ = {"xhci": 0, "over_current": 0, "enumeration": 0}
+    for line in out.splitlines():
+        ts = line[:19]
+        msg = line[20:]
+        body = msg.split("kernel: ", 1)[-1]
+        cats = [name for name, rx in PATTERNS if rx.search(body)]
+        if not cats:
+            continue
+        targets = set()
+        m = DEV_RE.findall(body)
+        for name in m:
+            targets.add(name)
+        for up in USB_RE.findall(body):
+            targets.add(usb_to_disk.get(up, "usb " + up))
+        if not targets:
+            if "xhci" in cats:
+                glob_["xhci"] += 1
+            if "over-current" in body:
+                glob_["over_current"] += 1
+            if "enumeration" in cats:
+                glob_["enumeration"] += 1
+                targets.add("unenumerated device")
+            else:
+                continue
+        for t in targets:
+            e = per.setdefault(t, {"counts": {}, "first": ts, "last": ts, "samples": []})
+            for c in cats:
+                e["counts"][c] = e["counts"].get(c, 0) + 1
+            e["last"] = ts
+            if len(e["samples"]) < 4 and not any(body[:60] in s for s in e["samples"]):
+                e["samples"].append(f"{ts[11:19]} {body[:150]}")
+    return per, glob_
+
+
+def previous_boot_counts():
+    rc, out, err = run(["journalctl", "-k", "-b", "-1", "--no-pager", "-q", "-o", "cat"], timeout=60)
+    if rc or not out:
+        return None
+    res = {"usb_resets": 0, "io_errors": 0, "medium_errors": 0}
+    for line in out.splitlines():
+        if PATTERNS[4][1].search(line):
+            res["usb_resets"] += 1
+        if PATTERNS[6][1].search(line):
+            res["io_errors"] += 1
+        if PATTERNS[0][1].search(line):
+            res["medium_errors"] += 1
+    return res
+
+
+# ---------------------------------------------------------------- opt-in actions (non-destructive)
+def read_sample(dev, size_bytes):
+    """Time 1 MiB O_DIRECT reads at 0 %, 25 %, 50 %, 75 % of the disk. Read-only; spins the drive up."""
+    import mmap
+    results = []
+    chunk = 1 << 20
+    for frac in (0.0, 0.25, 0.5, 0.75):
+        off = (int(size_bytes * frac) // 4096) * 4096
+        off = max(0, min(off, size_bytes - chunk))
+        out = {"offset_pct": int(frac * 100), "seconds": None, "error": None}
+
+        def work():
+            fd = None
+            try:
+                fd = os.open(dev, os.O_RDONLY | os.O_DIRECT)
+                buf = mmap.mmap(-1, chunk)
+                t0 = time.monotonic()
+                os.lseek(fd, off, os.SEEK_SET)
+                n = os.readv(fd, [buf])
+                out["seconds"] = round(time.monotonic() - t0, 3)
+                if n != chunk:
+                    out["error"] = f"short read {n}"
+            except OSError as e:
+                out["error"] = e.strerror
+            finally:
+                if fd is not None:
+                    os.close(fd)
+        th = threading.Thread(target=work, daemon=True)
+        th.start(); th.join(45)
+        if th.is_alive():
+            out["error"] = "no answer within 45 s (drive not responding)"
+            results.append(out)
+            break
+        results.append(out)
+    return results
+
+
+def start_selftest(dev):
+    rc, out, err = run(["smartctl", "-j", "-t", "short", dev], timeout=60, sudo=True)
+    try:
+        d = json.loads(out)
+        msgs = [m.get("string") for m in d.get("smartctl", {}).get("messages", [])]
+    except ValueError:
+        msgs = []
+    if rc == 0 or any("Testing has begun" in (m or "") for m in msgs):
+        return {"started": True, "note": "short self-test running, about 2 minutes; see self-test log in the next report"}
+    if rc & 2:
+        rc2, out2, err2 = run(["smartctl", "-j", "-d", "sat", "-t", "short", dev], timeout=60, sudo=True)
+        if rc2 == 0:
+            return {"started": True, "note": "short self-test running (via -d sat), about 2 minutes"}
+    return {"started": False, "note": (msgs[-1] if msgs else err) or "drive does not support self-tests through this bridge"}
+
+
+# ---------------------------------------------------------------- verdicts
+def judge(disk, kern):
+    """Classify one disk from SMART, filesystem and kernel evidence. Returns (status, reasons, suggestions)."""
+    reasons, sugg = [], []
+    sm = disk.get("smart") or {}
+    att = sm.get("attributes") or {}
+    name = disk["name"]
+    ext_desc = disk.get("label") or disk.get("mountpoints", [None])[0] or name
+
+    def raw(k):
+        v = (att.get(k) or {}).get("raw")
+        return v if isinstance(v, (int, float)) else None
+
+    media = False
+    if sm.get("passed") is False:
+        reasons.append("SMART overall health FAILED"); media = True
+    if sm.get("unavailable"):
+        reasons.append("SMART not readable: " + str(sm["unavailable"])[:80])
+    for k, label in (("pending_sectors", "pending (unreadable) sectors"), ("offline_uncorrectable", "offline uncorrectable sectors"),
+                     ("reallocated_sectors", "reallocated sectors")):
+        v = raw(k)
+        if v:
+            reasons.append(f"{v} {label}"); media = True
+    nv = sm.get("nvme") or {}
+    if nv.get("media_errors"):
+        reasons.append(f"{nv['media_errors']} NVMe media errors"); media = True
+    if nv.get("critical_warning"):
+        reasons.append(f"NVMe critical warning {nv['critical_warning']}"); media = True
+    for t in sm.get("self_tests") or []:
+        if t.get("passed") is False and t.get("status") and "read failure" in t["status"].lower():
+            reasons.append(f"last {t.get('type','')} self-test: {t['status']}"); media = True
+            break
+    kc = (kern.get(name) or {}).get("counts", {})
+    for part in disk.get("partitions", []):
+        for c, n in (kern.get(part["name"]) or {}).get("counts", {}).items():
+            kc[c] = kc.get(c, 0) + n
+    if kc.get("medium_error"):
+        reasons.append(f"{kc['medium_error']} medium-error lines in the kernel log"); media = True
+    link = False
+    for c, label in (("usb_reset", "USB resets"), ("link_crc", "USB link CRC errors"), ("timeout", "command timeouts"),
+                     ("not_ready", "'not ready / spinning up' events"), ("hardware_error", "hardware-error sense codes"),
+                     ("offline", "device-offline errors")):
+        if kc.get(c):
+            reasons.append(f"{kc[c]} {label}"); link = True
+    crc = raw("udma_crc_errors")
+    if crc:
+        reasons.append(f"{crc} interface CRC errors (cable/bridge)"); link = True
+    pc, por = raw("power_cycles"), raw("power_off_retracts")
+    retract_ratio = None
+    if disk.get("transport") == "usb" and pc and por is not None and pc >= 20 and por <= pc * 1.5:
+        retract_ratio = por / pc
+        if retract_ratio >= 0.5:
+            reasons.append(f"{por} emergency head retracts in {pc} power cycles (power cut without a clean stop)")
+    fs_ro = False
+    for part in disk.get("partitions", []):
+        m = part.get("mount") or {}
+        opts = m.get("options", "")
+        writable_fs = part.get("fstype") in ("ext4", "ext3", "ext2", "xfs", "btrfs", "f2fs", "ntfs", "ntfs3", "fuseblk", "vfat", "exfat")
+        if m and ("emergency_ro" in opts or (writable_fs and re.search(r"(^|,)ro(,|$)", opts))):
+            reasons.append(f"{part['name']} is mounted READ-ONLY ({'emergency' if 'emergency_ro' in opts else 'ro'})"); fs_ro = True
+        e4 = part.get("ext4") or {}
+        if e4.get("error_count"):
+            reasons.append(f"{part['name']}: ext4 has {e4['error_count']} recorded errors, state '{e4.get('state')}'")
+        if e4.get("state") and "error" in e4["state"]:
+            fs_ro = fs_ro or False
+    if kc.get("remount_ro"):
+        reasons.append(f"{kc['remount_ro']} filesystem shutdown / remount-read-only events"); fs_ro = True
+
+    if sm.get("skipped"):
+        status = "asleep (not woken)"
+    elif media and link:
+        status = "FAILING media, plus link or power trouble"
+    elif media:
+        status = "FAILING media"
+    elif fs_ro:
+        status = "filesystem forced read-only"
+    elif link:
+        status = "link or power trouble (disk itself looks fine)"
+    elif sm.get("unavailable") and not kc:
+        status = "unknown (SMART unreadable, no kernel errors)"
+    else:
+        status = "healthy"
+
+    if media:
+        sugg.append(f"{ext_desc}: back up now, then plan to replace it. Do not run a repairing fsck or a rewrite until the data is copied off.")
+    if link and not media:
+        sugg.append(f"{ext_desc}: the disk reports no media damage; the errors are on the USB side. Try a different cable or a motherboard port before suspecting the drive.")
+    if fs_ro:
+        sugg.append(f"{ext_desc}: a filesystem was forced read-only. After the cause is fixed, unmount and run fsck (that step changes the disk, so it needs an explicit go-ahead).")
+    if retract_ratio is not None and retract_ratio >= 0.5:
+        sugg.append(f"{ext_desc}: nearly every power-off was abrupt. Eject before unplugging, and check the hub's power supply.")
+    return status, reasons, sugg, {"media": media, "link": link, "fs_ro": fs_ro}
+
+
+def hub_verdicts(disks, kern):
+    """Group external disks by the hub they hang off and look for shared trouble."""
+    groups = {}
+    for d in disks:
+        u = d.get("usb")
+        if not u or not u["on_external_hub"]:
+            continue
+        ext = [h for h in u["hub_chain"] if not h["root_hub"]]
+        top = ext[-1]                 # hub closest to the PC
+        g = groups.setdefault(top["devpath"], {"hub": top, "disks": [], "levels": len(ext)})
+        g["disks"].append(d)
+        g["levels"] = max(g["levels"], len(ext))
+    out = []
+    for path, g in groups.items():
+        hub, ds = g["hub"], g["disks"]
+        names = [d.get("label") or d["name"] for d in ds]
+        draw = sum((d["usb"].get("bMaxPower_ma") or 0) for d in ds)
+        spinning = [d for d in ds if d.get("rotational")]
+        troubled = [d for d in ds if d["verdict_flags"]["link"]]
+        oc = sum((h["our_port"] or {}).get("over_current_count") or 0 for d in ds for h in d["usb"]["hub_chain"])
+        reasons, sugg = [], []
+        if len(spinning) >= 3:
+            reasons.append(f"{len(spinning)} spinning drives share this hub; 2.5-inch drives draw about 1 A each at spin-up, "
+                           f"so simultaneous spin-up needs roughly {len(spinning)} A at 5 V")
+        if draw:
+            reasons.append(f"declared draw of the drives on it: {draw} mA (enclosures often under-declare)")
+        if hub.get("power_switching"):
+            reasons.append("hub power switching: " + hub["power_switching"])
+        if hub.get("descriptor_error"):
+            reasons.append(hub["descriptor_error"])
+        if hub.get("self_powered_claim") is not None:
+            reasons.append("hub descriptor says " + ("self-powered (has or expects its own adapter)" if hub["self_powered_claim"] else "BUS-POWERED: 900 mA total for everything on it"))
+        if g["levels"] > 1:
+            reasons.append(f"{g['levels']} hub levels between the drives and the PC (cascaded hubs)")
+        if oc:
+            reasons.append(f"{oc} over-current events counted on the ports used")
+        if len(troubled) >= 2:
+            status = "SHARED HUB PROBLEM likely (power or signal)"
+            reasons.insert(0, f"{len(troubled)} different drives on this hub show link/power errors: " + ", ".join(d.get("label") or d["name"] for d in troubled))
+            sugg.append("Move the drives to motherboard ports one at a time and see which errors stop. If they do, the hub or its power adapter is the cause.")
+            sugg.append("A hub for several spinning drives needs an adapter rated for at least 1.5 A per drive port.")
+        elif len(troubled) == 1:
+            status = "one drive troubled; hub not proven at fault"
+            sugg.append(f"Try {troubled[0].get('label') or troubled[0]['name']} on a motherboard port to separate drive from hub.")
+        elif len(spinning) >= 3:
+            status = "no errors now, but heavily loaded"
+            sugg.append("Avoid making all drives spin up or work at once; stagger heavy jobs or split the drives across ports.")
+        else:
+            status = "fine"
+        out.append({"hub": hub, "drives": names, "status": status, "reasons": reasons, "suggestions": sugg})
+    return out
+
+
+# ---------------------------------------------------------------- main
+def main():
+    opts = parse_args()
+    now = datetime.now().astimezone()
+    rep = {"host": os.uname().nodename, "time": now.isoformat(timespec="seconds"),
+           "kernel": os.uname().release, "hours": opts["hours"], "read_only": True,
+           "actions": [], "errors": ERRORS}
+    up = readf("/proc/uptime")
+    if up:
+        rep["booted"] = (now - timedelta(seconds=float(up.split()[0]))).isoformat(timespec="seconds")
+
+    mnts = mounts()
+    disks = []
+    for d in block_devices():
+        tran = d.get("tran")
+        disk = {"name": d["name"], "path": d["path"], "model": (d.get("model") or "").strip() or None,
+                "vendor": (d.get("vendor") or "").strip() or None, "size_bytes": d.get("size"),
+                "size": human(d.get("size")), "transport": tran, "rotational": bool(d.get("rota")),
+                "removable": bool(d.get("rm") or d.get("hotplug")), "state": d.get("state"),
+                "partitions": [], "mountpoints": [], "label": None}
+        if tran == "usb":
+            disk["usb"] = usb_info(d["name"])
+        for c in d.get("children", []) or []:
+            part = {"name": c["name"], "path": c["path"], "size": human(c.get("size")), "fstype": c.get("fstype"),
+                    "uuid": c.get("uuid"), "label": c.get("label"), "mountpoint": c.get("mountpoint"),
+                    "used_pct": c.get("fsuse%"), "fs_size": c.get("fssize"), "fs_avail": c.get("fsavail")}
+            if c.get("mountpoint"):
+                disk["mountpoints"].append(c["mountpoint"])
+                part["mount"] = mnts.get(c["path"]) or {}
+                if part["fs_size"]:
+                    part["fs_size"], part["fs_avail"] = human(part["fs_size"]), human(part["fs_avail"])
+            if c.get("fstype") in ("ext4", "ext3", "ext2"):
+                part["ext4"] = tune2fs(c["path"])
+            if c.get("label") and not disk["label"]:
+                disk["label"] = c["label"]
+            disk["partitions"].append(part)
+        if not disk["label"] and disk["mountpoints"]:
+            disk["label"] = os.path.basename(disk["mountpoints"][0])
+        disk["smart"] = smart(d["path"], tran)
+        disks.append(disk)
+
+    # fstab cross-check: which configured drives are missing or not mounted
+    present_uuid = {p["uuid"]: (d, p) for d in disks for p in d["partitions"] if p.get("uuid")}
+    present_label = {p["label"]: (d, p) for d in disks for p in d["partitions"] if p.get("label")}
+    fst = []
+    for e in fstab():
+        hit = present_uuid.get(e.get("uuid")) or present_label.get(e.get("label"))
+        e["device_present"] = bool(hit)
+        if hit:
+            e["device"] = hit[1]["name"]
+            e["mounted"] = hit[1].get("mountpoint") == e["target"]
+        else:
+            e["mounted"] = False
+        fst.append(e)
+    units, failed_units = mount_units([e["target"] for e in fst])
+    for e in fst:
+        e["unit"] = units.get(e["target"])
+    rep["fstab"] = fst
+    rep["failed_units"] = failed_units
+
+    kern, glob_ = kernel_digest(opts["hours"], disks)
+    rep["kernel_log"] = {"per_device": kern, "global": glob_, "previous_boot": previous_boot_counts()}
+
+    # opt-in actions
+    if opts["read_sample"]:
+        rep["read_only"] = True   # still read-only, but it spins drives up
+        for disk in disks:
+            if disk.get("smart", {}).get("skipped"):
+                disk["read_sample"] = {"skipped": "drive asleep"}; continue
+            disk["read_sample"] = read_sample(disk["path"], int(disk["size_bytes"] or 0))
+        rep["actions"].append("read-sample: 1 MiB read at 4 offsets of every awake disk")
+    if opts["selftest"]:
+        only = opts["selftest"].split(":")[1] if ":" in opts["selftest"] else None
+        for disk in disks:
+            if only and disk["name"] != only:
+                continue
+            disk["selftest"] = start_selftest(disk["path"])
+        rep["actions"].append(f"selftest short started on {only or 'all drives'} (non-destructive)")
+
+    # verdicts
+    suggestions = []
+    for disk in disks:
+        status, reasons, sugg, flags = judge(disk, kern)
+        disk["verdict"], disk["verdict_reasons"], disk["verdict_flags"] = status, reasons, flags
+        suggestions.extend(sugg)
+    rep["hubs"] = hub_verdicts(disks, kern)
+    for h in rep["hubs"]:
+        suggestions.extend(h["suggestions"])
+    for e in fst:
+        if not e["device_present"]:
+            suggestions.append(f"{e['target']} is in fstab but its drive is not connected (or not enumerating). Check cable, power light, and try another port.")
+        elif not e["mounted"]:
+            suggestions.append(f"{e['target']}: drive {e.get('device')} is present but not mounted. Check the mount unit; mounting changes nothing on disk but needs a go-ahead.")
+    for f in failed_units:
+        suggestions.append(f"systemd unit failed: {f}")
+    if glob_.get("xhci"):
+        suggestions.append(f"{glob_['xhci']} USB host-controller timeouts in the log: the PC's own USB controller struggled, not just one drive.")
+    rep["suggestions"] = list(dict.fromkeys(suggestions))
+    rep["disks"] = disks
+    print(json.dumps(rep, default=str))
+
+
+if __name__ == "__main__":
+    main()

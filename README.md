@@ -12,6 +12,7 @@ This repository is Novee's public workspace and the source of truth for it. The 
 - `skills/`: every skill Novee has.
   - `linux-sysadmin`: system health, processes, services, logs, network, LAN scan, docker, hardware; changes only through an approval-gated `manage` command.
   - `gpu-stats`: what is using the host PC's GPU, loaded models, and which machine called Ollama.
+  - `disk-health`: SMART, bad sectors, filesystem state, mounts, USB hub chain and power, kernel I/O errors for every drive on the host PC, with a verdict per drive and per hub. Read-only; tests only on request.
   - `news-headlines`: real headlines from RSS feeds, with the same story from several outlets merged.
   - `repo-sync`: pull, push and conflict handling for this repository, with a privacy check before every push.
   - `vbox-manage`: VirtualBox on the host PC: list, create (unattended Ubuntu), ISO search and download, start, stop, snapshots, console screenshots, SSH setup. Changes need the owner's approval; novee and umbrel are protected.
