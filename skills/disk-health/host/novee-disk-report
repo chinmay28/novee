@@ -63,7 +63,7 @@ def parse_args():
             opts["hours"] = max(1, min(int(argv[i + 1]), 720)); i += 2
         elif a.startswith("--hours=") and re.fullmatch(r"\d{1,3}", a[8:]):
             opts["hours"] = max(1, min(int(a[8:]), 720)); i += 1
-        elif a == "--selftest" and i + 1 < len(argv) and re.fullmatch(r"short(:[a-z]{2,3}[a-z0-9]{0,2})?", argv[i + 1]):
+        elif a == "--selftest" and i + 1 < len(argv) and re.fullmatch(r"short(:[A-Za-z0-9._-]{1,40})?", argv[i + 1]):
             opts["selftest"] = argv[i + 1]; i += 2
         elif a == "--read-sample":
             opts["read_sample"] = True; i += 1
@@ -495,20 +495,35 @@ def read_sample(dev, size_bytes):
     return results
 
 
-def start_selftest(dev):
-    rc, out, err = run(["smartctl", "-j", "-t", "short", dev], timeout=60, sudo=True)
+def start_selftest(dev, smart_info):
+    """Start a SMART short self-test (non-destructive) with the device type that worked for reading SMART.
+    If a test is already running, say so instead of restarting it."""
+    flags = " ".join(smart_info.get("flags") or [])
+    if smart_info.get("device_type") == "scsi" or "blocks ATA pass-through" in flags:
+        return {"started": False, "note": "this USB bridge does not pass SMART commands through, so no self-test can be started from the PC"}
+    dtype = smart_info.get("device_type")
+    extra = ["-d", dtype] if dtype in ("sat", "nvme", "ata", "scsi") else []
+    # already running?
+    rc, out, err = run(["smartctl", "-j", "-c"] + extra + [dev], timeout=60, sudo=True)
     try:
-        d = json.loads(out)
-        msgs = [m.get("string") for m in d.get("smartctl", {}).get("messages", [])]
+        st = json.loads(out).get("ata_smart_data", {}).get("self_test", {}).get("status", {})
     except ValueError:
-        msgs = []
-    if rc == 0 or any("Testing has begun" in (m or "") for m in msgs):
-        return {"started": True, "note": "short self-test running, about 2 minutes; see self-test log in the next report"}
-    if rc & 2:
-        rc2, out2, err2 = run(["smartctl", "-j", "-d", "sat", "-t", "short", dev], timeout=60, sudo=True)
-        if rc2 == 0:
-            return {"started": True, "note": "short self-test running (via -d sat), about 2 minutes"}
-    return {"started": False, "note": (msgs[-1] if msgs else err) or "drive does not support self-tests through this bridge"}
+        st = {}
+    if st.get("remaining_percent") is not None:
+        return {"started": True, "note": f"a self-test is already running on this drive, {st['remaining_percent']}% left; not restarted"}
+    last = ""
+    for ex in ([extra] if extra else []) + [[]]:
+        rc, out, err = run(["smartctl", "-j"] + ex + ["-t", "short", dev], timeout=60, sudo=True)
+        try:
+            d = json.loads(out)
+            msgs = [m.get("string") or "" for m in d.get("smartctl", {}).get("messages", [])]
+        except ValueError:
+            d, msgs = {}, []
+        if rc == 0 or "Testing has begun" in out:
+            how = f" (smartctl {' '.join(ex)})" if ex else ""
+            return {"started": True, "note": f"short self-test running{how}, about 2 minutes; the result appears under 'last self-test' in a report run a few minutes from now"}
+        last = (msgs[-1] if msgs else err) or last or f"smartctl exit status {rc}"
+    return {"started": False, "note": last}
 
 
 # ---------------------------------------------------------------- verdicts
@@ -745,12 +760,24 @@ def main():
             disk["read_sample"] = read_sample(disk["path"], int(disk["size_bytes"] or 0))
         rep["actions"].append("read-sample: 1 MiB read at 4 offsets of every awake disk")
     if opts["selftest"]:
-        only = opts["selftest"].split(":")[1] if ":" in opts["selftest"] else None
-        for disk in disks:
-            if only and disk["name"] != only:
+        only = opts["selftest"].split(":", 1)[1].lower() if ":" in opts["selftest"] else None
+
+        def is_target(disk):
+            if not only:
+                return True
+            hay = [disk["name"], disk.get("label"), disk.get("model")] + [os.path.basename(m) for m in disk.get("mountpoints", [])]
+            return any(h and only == str(h).lower() for h in hay) or any(h and only in str(h).lower() for h in hay if len(only) >= 4)
+        targets = [d for d in disks if is_target(d)]
+        if only and not targets:
+            rep["actions"].append(f"selftest NOT started: no drive matches '{only}' (use a name like sdc, a label, or a mount folder name)")
+        for disk in targets:
+            if disk.get("smart", {}).get("skipped"):
+                disk["selftest"] = {"started": False, "note": "drive is asleep; not woken for a test"}
                 continue
-            disk["selftest"] = start_selftest(disk["path"])
-        rep["actions"].append(f"selftest short started on {only or 'all drives'} (non-destructive)")
+            disk["selftest"] = start_selftest(disk["path"], disk.get("smart") or {})
+        if targets:
+            rep["actions"].append("selftest short requested for " + ", ".join(d.get("label") or d["name"] for d in targets)
+                                  + " (non-destructive; see each drive's self-test line)")
 
     # verdicts
     suggestions = []
