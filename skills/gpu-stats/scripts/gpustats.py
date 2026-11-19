@@ -76,6 +76,7 @@ def main():
     ap.add_argument("--hours", type=int, default=2,
                     help="hours of Ollama request history to show (1-168, default 2)")
     ap.add_argument("--json", action="store_true", help="print the raw report")
+    ap.add_argument("machine", nargs="*", help="ignored: there is only one GPU machine")
     a = ap.parse_args()
     r = fetch(max(1, min(a.hours, 168)))
     if a.json:

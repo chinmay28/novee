@@ -1,6 +1,6 @@
 ---
 name: gpu-stats
-description: Report what is using the GPU of the host PC and who asked for it. Use for "what is using my GPU", "which application is using the GPU", "why are my GPU fans spinning", "why is the GPU loud or hot", GPU temperature, GPU load or utilization, VRAM or GPU memory usage, "is the GPU busy or free", "which model is loaded in Ollama", "who is calling Ollama", "what woke up the GPU".
+description: GPU usage of Chinmay's PC (the host PC, the machine with the NVIDIA GPU, whatever hostname or name Chinmay calls it), and which apps are using it. One command, no SSH needed. Use for "what is my GPU usage", "GPU usage on <hostname>", "what apps are using the GPU", "which application is using the GPU", "why are my GPU fans spinning", "why is the GPU loud or hot", GPU temperature, GPU load or utilization, VRAM or GPU memory usage, "is the GPU busy or free", "which model is loaded in Ollama", "who is calling Ollama", "what woke up the GPU", "run nvidia-smi".
 metadata:
   {
     "openclaw":
@@ -14,13 +14,19 @@ metadata:
 
 # gpu-stats
 
-The GPU is in the host PC, not in this VM. One script asks the host for a read-only report and prints plain-text bullets. Run it with `exec`, read the output, then answer Chinmay.
+There is exactly one GPU: the NVIDIA card in Chinmay's PC, called the host PC here. Chinmay may name that machine by its hostname, or say "my PC", "my desktop", "the server", "the Ubuntu box" or "the host". All of these mean the same machine, and every GPU question is about it. TOOLS.md has its hostname.
+
+This script already connects to that machine by itself and returns the live GPU report. Run it with `exec`, read the output, then answer Chinmay.
 
 ```bash
 python3 {baseDir}/scripts/gpustats.py
 ```
 
-Run it immediately for any GPU question. Do not ask first, and do not try `nvidia-smi` on this VM (there is no GPU here, it will fail).
+Rules:
+- Run it immediately, in the first turn, for any GPU question. Do not ask first and do not offer options.
+- Never say the GPU cannot be reached from this VM. It can: this script reaches it.
+- Never run `ssh` or `nvidia-smi` yourself, never ask for a password or an SSH key, and never tell Chinmay to run a command. The script has its own key and needs nothing else.
+- A machine name in the question changes nothing. Run the same command with no extra arguments.
 
 ## Options
 
