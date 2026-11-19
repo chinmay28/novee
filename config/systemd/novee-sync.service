@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync Novee's workspace with its GitHub repository
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.openclaw/workspace/skills/repo-sync/scripts/reposync.py sync --auto
+# Exit code 2 means "done, but a conflict or a blocked push was reported to the owner".
+SuccessExitStatus=2
+TimeoutStartSec=300

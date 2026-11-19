@@ -1,0 +1,32 @@
+# Whitelist: everything in the workspace is private unless it is listed here.
+# The repository is public. Do not add USER.md, TOOLS.md, IDENTITY.md,
+# MEMORY.md, DREAMS.md or memory/ to this list.
+/*
+!/.gitignore
+!/LICENSE
+!/README.md
+!/HISTORY.md
+!/AGENTS.md
+!/SOUL.md
+!/HEARTBEAT.md
+!/skills/
+!/docs/
+!/examples/
+!/config/
+!/avatars/
+
+# Never published, wherever they are
+__pycache__/
+*.pyc
+*.bak
+*.bak-*
+*.orig
+*.rej
+.env
+.env.*
+.credentials*
+*credentials*.json
+*.pem
+*.key
+*.sqlite
+*.local.*

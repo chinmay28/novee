@@ -1,0 +1,56 @@
+{
+  "agents": {
+    "defaults": {
+      "workspace": "/home/USER/.openclaw/workspace",
+      "model": { "primary": "ollama/qwen3.5:9b", "fallbacks": ["openai/gpt-6-astra"] },
+      "thinkingDefault": "low",
+      "heartbeat": { "every": "0m", "target": "none" }
+    },
+    "entries": {
+      "novee": {
+        "name": "Novee",
+        "identity": { "name": "Novee", "emoji": "✨", "avatar": "avatars/novee-robot.png" },
+        "thinkingDefault": "low"
+      }
+    }
+  },
+  "models": {
+    "providers": {
+      "ollama": {
+        "api": "ollama",
+        "baseUrl": "http://HOST_PC:11434",
+        "timeoutSeconds": 600,
+        "models": [
+          {
+            "id": "qwen3.5:9b",
+            "name": "Qwen3.5 9B (170k ctx)",
+            "reasoning": true,
+            "contextWindow": 174080,
+            "contextTokens": 174080,
+            "maxTokens": 16384,
+            "params": { "num_ctx": 174080, "keep_alive": "30m" }
+          }
+        ]
+      }
+    }
+  },
+  "gateway": { "mode": "local", "port": 18789, "bind": "lan", "auth": { "mode": "token", "token": "GENERATED_AT_ONBOARDING" } },
+  "tools": {
+    "profile": "full",
+    "web": { "search": { "provider": "duckduckgo", "enabled": true } },
+    "exec": { "strictInlineEval": true }
+  },
+  "channels": {
+    "telegram": {
+      "enabled": true,
+      "name": "Novee",
+      "botToken": "FROM_BOTFATHER",
+      "allowFrom": ["OWNER_TELEGRAM_ID"],
+      "dmPolicy": "allowlist",
+      "markdown": { "tables": "bullets" }
+    }
+  },
+  "commands": { "ownerAllowFrom": ["telegram:OWNER_TELEGRAM_ID"] },
+  "plugins": { "entries": { "telegram": { "enabled": true }, "ollama": { "enabled": true }, "duckduckgo": { "enabled": true } } },
+  "telemetry": { "enabled": false }
+}

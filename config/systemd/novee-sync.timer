@@ -1,0 +1,11 @@
+[Unit]
+Description=Sync Novee's workspace with GitHub every 8 hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=8h
+RandomizedDelaySec=2min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

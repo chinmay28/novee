@@ -1,0 +1,157 @@
+#!/usr/bin/env python3
+"""Read-only GPU report for the novee VM (runs on the host as an SSH forced command).
+
+Prints one JSON object: GPU state, processes on the GPU, models Ollama has
+loaded, and who called Ollama recently. Takes one optional argument, the
+number of hours of Ollama history (1-168), from SSH_ORIGINAL_COMMAND or argv.
+Nothing here changes any state.
+"""
+import json, os, re, subprocess, sys, urllib.request
+from datetime import datetime
+
+
+def run(cmd, timeout=15):
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout, p.stderr.strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, "", str(e)
+
+
+def num(s):
+    try:
+        return float(s)
+    except ValueError:
+        return None
+
+
+def gpus():
+    fields = ["index", "name", "temperature.gpu", "fan.speed", "utilization.gpu",
+              "memory.used", "memory.total", "power.draw", "power.limit"]
+    rc, out, err = run(["nvidia-smi", "--query-gpu=" + ",".join(fields),
+                        "--format=csv,noheader,nounits"])
+    if rc:
+        return None, err or "nvidia-smi failed"
+    res = []
+    for line in out.strip().splitlines():
+        v = [x.strip() for x in line.split(",")]
+        if len(v) != len(fields):
+            continue
+        res.append({"index": int(v[0]), "name": v[1], "temp_c": num(v[2]),
+                    "fan_pct": num(v[3]), "util_pct": num(v[4]),
+                    "mem_used_mib": num(v[5]), "mem_total_mib": num(v[6]),
+                    "power_w": num(v[7]), "power_limit_w": num(v[8])})
+    return res, None
+
+
+def proc_name(pid):
+    """Program name only (never the full command line)."""
+    try:
+        return os.path.basename(os.readlink(f"/proc/{pid}/exe"))
+    except OSError:
+        pass
+    try:
+        with open(f"/proc/{pid}/comm") as f:
+            return f.read().strip() or "?"
+    except OSError:
+        return "?"
+
+
+def proc_user(pid):
+    try:
+        import pwd
+        return pwd.getpwuid(os.stat(f"/proc/{pid}").st_uid).pw_name
+    except (OSError, KeyError):
+        return "?"
+
+
+def processes():
+    rc, out, err = run(["nvidia-smi"])
+    if rc:
+        return []
+    res = []
+    row = re.compile(r"^\|\s+(\d+)\s+\S+\s+\S+\s+(\d+)\s+(\S+)\s+.*?\s+(\d+)MiB\s+\|$")
+    for line in out.splitlines():
+        m = row.match(line)
+        if m:
+            pid = int(m.group(2))
+            res.append({"gpu": int(m.group(1)), "pid": pid, "type": m.group(3),
+                        "name": proc_name(pid), "user": proc_user(pid),
+                        "mem_mib": int(m.group(4))})
+    res.sort(key=lambda p: -p["mem_mib"])
+    return res
+
+
+def ollama_loaded():
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:11434/api/ps", timeout=5) as r:
+            data = json.load(r)
+    except Exception as e:
+        return None, str(e)
+    res = []
+    for m in data.get("models", []):
+        size, vram = m.get("size") or 0, m.get("size_vram") or 0
+        res.append({"name": m.get("name"), "size_mib": round(size / 2**20),
+                    "vram_mib": round(vram / 2**20),
+                    "gpu_pct": round(100 * vram / size) if size else None,
+                    "context": m.get("context_length"),
+                    "expires_at": m.get("expires_at")})
+    return res, None
+
+
+GIN = re.compile(r"\[GIN\] (\d{4}/\d\d/\d\d - \d\d:\d\d:\d\d) \|\s*(\d+)\s*\|\s*(\S+)\s*\|\s*(\S+)\s*\|\s*(\S+)\s+\"([^\"]*)\"")
+WORK = ("/api/chat", "/api/generate", "/api/embed", "/api/embeddings", "/v1/")
+
+
+def ollama_calls(hours):
+    rc, out, err = run(["journalctl", "-u", "ollama", "--since", f"-{hours}h",
+                        "-o", "cat", "--no-pager"], timeout=40)
+    if rc:
+        return None, err or "journalctl failed"
+    agg = {}
+    for line in out.splitlines():
+        m = GIN.search(line)
+        if not m:
+            continue
+        when, status, _dur, ip, method, path = m.groups()
+        if method != "POST" or not path.startswith(WORK):
+            continue
+        a = agg.setdefault(ip, {"ip": ip, "requests": 0, "failed": 0,
+                                "first": when, "last": when, "paths": []})
+        a["requests"] += 1
+        if not status.startswith("2"):
+            a["failed"] += 1
+        a["last"] = when
+        if path not in a["paths"]:
+            a["paths"].append(path)
+    fmt = "%Y/%m/%d - %H:%M:%S"
+    for a in agg.values():
+        for k in ("first", "last"):
+            a[k] = datetime.strptime(a[k], fmt).astimezone().isoformat(timespec="seconds")
+    return sorted(agg.values(), key=lambda a: a["last"], reverse=True), None
+
+
+def main():
+    arg = (os.environ.get("SSH_ORIGINAL_COMMAND") or " ".join(sys.argv[1:])).strip()
+    hours = int(arg) if re.fullmatch(r"\d{1,3}", arg) else 2
+    hours = max(1, min(hours, 168))
+    rep = {"host": os.uname().nodename,
+           "time": datetime.now().astimezone().isoformat(timespec="seconds"),
+           "errors": []}
+    rep["gpus"], e = gpus()
+    if e:
+        rep["errors"].append("nvidia-smi: " + e)
+    rep["processes"] = processes()
+    rep["ollama_loaded"], e = ollama_loaded()
+    if e:
+        rep["errors"].append("ollama: " + e)
+    rep["history_hours"] = hours
+    rep["ollama_calls"], e = ollama_calls(hours)
+    if e:
+        rep["errors"].append("ollama log: " + e)
+    json.dump(rep, sys.stdout, indent=1)
+    print()
+
+
+if __name__ == "__main__":
+    main()

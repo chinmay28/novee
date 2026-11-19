@@ -1,0 +1,250 @@
+{
+ "version": 1,
+ "defaults": {
+  "security": "allowlist",
+  "ask": "on-miss",
+  "askFallback": "deny"
+ },
+ "agents": {
+  "novee": {
+   "security": "allowlist",
+   "ask": "on-miss",
+   "askFallback": "deny",
+   "allowlist": [
+    {
+     "pattern": "python3",
+     "argPattern": "^(-I )?/home/chinmay/\\.openclaw/workspace/skills/[a-z0-9-]+/scripts/[a-z0-9_-]+\\.py(?!.*\\bmanage\\b.*--yes)( .*)?$"
+    },
+    {
+     "pattern": "/usr/bin/python3*",
+     "argPattern": "^(-I )?/home/chinmay/\\.openclaw/workspace/skills/[a-z0-9-]+/scripts/[a-z0-9_-]+\\.py(?!.*\\bmanage\\b.*--yes)( .*)?$"
+    },
+    {
+     "pattern": "ls"
+    },
+    {
+     "pattern": "cat"
+    },
+    {
+     "pattern": "head"
+    },
+    {
+     "pattern": "tail"
+    },
+    {
+     "pattern": "wc"
+    },
+    {
+     "pattern": "grep"
+    },
+    {
+     "pattern": "find"
+    },
+    {
+     "pattern": "du"
+    },
+    {
+     "pattern": "df"
+    },
+    {
+     "pattern": "free"
+    },
+    {
+     "pattern": "uptime"
+    },
+    {
+     "pattern": "date"
+    },
+    {
+     "pattern": "echo"
+    },
+    {
+     "pattern": "printf"
+    },
+    {
+     "pattern": "which"
+    },
+    {
+     "pattern": "uname"
+    },
+    {
+     "pattern": "hostname"
+    },
+    {
+     "pattern": "id"
+    },
+    {
+     "pattern": "whoami"
+    },
+    {
+     "pattern": "pwd"
+    },
+    {
+     "pattern": "stat"
+    },
+    {
+     "pattern": "file"
+    },
+    {
+     "pattern": "sort"
+    },
+    {
+     "pattern": "uniq"
+    },
+    {
+     "pattern": "cut"
+    },
+    {
+     "pattern": "tr"
+    },
+    {
+     "pattern": "awk"
+    },
+    {
+     "pattern": "sed",
+     "argPattern": "^(?!.*-i).*"
+    },
+    {
+     "pattern": "jq"
+    },
+    {
+     "pattern": "ps"
+    },
+    {
+     "pattern": "pgrep"
+    },
+    {
+     "pattern": "pstree"
+    },
+    {
+     "pattern": "lsof"
+    },
+    {
+     "pattern": "ip",
+     "argPattern": "^(-[a-z0-9]+ )*(addr|address|link|route|neigh|neighbour|-br|-j|-4|-6)( .*)?$"
+    },
+    {
+     "pattern": "ss"
+    },
+    {
+     "pattern": "ping",
+     "argPattern": "^-c [0-9]+( .*)?$|^.* -c [0-9]+.*$"
+    },
+    {
+     "pattern": "dig"
+    },
+    {
+     "pattern": "nslookup"
+    },
+    {
+     "pattern": "host"
+    },
+    {
+     "pattern": "traceroute"
+    },
+    {
+     "pattern": "curl",
+     "argPattern": "^(?!.*(-o |--output|-O|-T |--upload-file|-d |--data|-F |--form|-X (POST|PUT|DELETE|PATCH))).*"
+    },
+    {
+     "pattern": "journalctl",
+     "argPattern": "^(?!.*--vacuum).*"
+    },
+    {
+     "pattern": "systemctl",
+     "argPattern": "^(--user )?(status|show|cat|is-active|is-enabled|is-failed|list-units|list-unit-files|list-timers|list-dependencies)( .*)?$"
+    },
+    {
+     "pattern": "git",
+     "argPattern": "^(status|log|diff|show|branch|remote|rev-parse|ls-files|blame)( .*)?$"
+    },
+    {
+     "pattern": "lsblk"
+    },
+    {
+     "pattern": "lscpu"
+    },
+    {
+     "pattern": "lspci"
+    },
+    {
+     "pattern": "lsusb"
+    },
+    {
+     "pattern": "sensors"
+    },
+    {
+     "pattern": "nproc"
+    },
+    {
+     "pattern": "env"
+    },
+    {
+     "pattern": "true"
+    },
+    {
+     "pattern": "sleep",
+     "argPattern": "^[0-9]{1,2}$"
+    },
+    {
+     "pattern": "top",
+     "argPattern": "^(?=.*-b).*$"
+    },
+    {
+     "pattern": "vmstat"
+    },
+    {
+     "pattern": "iostat"
+    },
+    {
+     "pattern": "mpstat"
+    },
+    {
+     "pattern": "who"
+    },
+    {
+     "pattern": "w"
+    },
+    {
+     "pattern": "last"
+    },
+    {
+     "pattern": "timeout"
+    },
+    {
+     "pattern": "nice"
+    },
+    {
+     "pattern": "column"
+    },
+    {
+     "pattern": "tee",
+     "argPattern": "^/dev/null$"
+    },
+    {
+     "pattern": "basename"
+    },
+    {
+     "pattern": "dirname"
+    },
+    {
+     "pattern": "readlink"
+    },
+    {
+     "pattern": "realpath"
+    },
+    {
+     "pattern": "getent"
+    },
+    {
+     "pattern": "resolvectl",
+     "argPattern": "^(status|query .*)$"
+    },
+    {
+     "pattern": "openclaw",
+     "argPattern": "^(status|health|channels status|skills list|models list|config get|sessions list|--version|logs)( .*)?$"
+    }
+   ]
+  }
+ }
+}

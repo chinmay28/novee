@@ -1,0 +1,8 @@
+# ~/.config/novee/private-terms.txt
+# One term per line. repo-sync refuses to push any file that contains one of them
+# (case-insensitive). Lines starting with "re:" are regular expressions.
+# Secrets and the owner's chat id from ~/.openclaw/openclaw.json are blocked automatically.
+YourSurname
+Your City
+your-hostname
+re:192\.168\.50\.\d+
