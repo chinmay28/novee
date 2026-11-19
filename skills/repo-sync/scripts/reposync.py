@@ -412,7 +412,9 @@ def publish(message):
         git("update-ref", f"refs/remotes/{UPSTREAM}", "HEAD")
         return "pushed", paths
     git("reset", "-q", "--mixed", "HEAD~1")  # keep the edits, drop the unpublished commit
-    reason = last_line(err)
+    key = [l.strip() for l in err.splitlines()
+           if re.search(r"(?i)(denied|rejected|fatal|error|unable|could not)", l)]
+    reason = key[0] if key else last_line(err)
     if re.search(r"(?i)(rejected|non-fast-forward|fetch first)", err):
         return "raced", [reason]
     if re.search(r"(?i)(permission denied|publickey|authentication|could not read|403|denied|read-only)", err):
