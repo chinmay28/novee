@@ -56,7 +56,25 @@ restrict,from="VM_ADDRESS",command="/home/USER/.local/bin/novee-gpu-report" ssh-
 
 On the VM: create the key with `ssh-keygen -t ed25519 -N "" -f ~/.ssh/gpu-stats`, add the host's key to `~/.ssh/known_hosts`, and copy `examples/gpu-stats.example.json` to `~/.config/novee/gpu-stats.json` with the real addresses. The host script is not updated by the sync; reinstall it by hand when it changes.
 
-## 6. Exec approvals
+## 6. vbox-manage
+
+VirtualBox runs on the host PC, so the host exposes one helper that only this skill can call.
+
+On the host PC:
+
+```bash
+install -m 755 skills/vbox-manage/host/novee-vbox ~/.local/bin/novee-vbox
+# one line in ~/.ssh/authorized_keys, with the VM's address and the public key from the VM:
+restrict,from="VM_ADDRESS",command="/home/USER/.local/bin/novee-vbox" ssh-ed25519 AAAA... novee-vbox-manage
+# optional: VMs the helper must never stop or delete (default: novee, umbrel)
+printf 'novee\numbrel\n' > ~/.config/novee/vbox-protected.txt
+```
+
+The helper needs `VBoxManage`, `xorriso` (unattended Ubuntu installs) and `openssl`. ISOs it downloads go to `~/VirtualBox VMs/iso/`. New VMs get the host's `~/.ssh/id_ed25519.pub` and the VM's `~/.ssh/novee-vms.pub` preinstalled, and `ssh-setup` adds a `Host NAME` entry to the host's `~/.ssh/config`.
+
+On the VM: `ssh-keygen -t ed25519 -N "" -f ~/.ssh/vbox-manage`, add the host to `~/.ssh/known_hosts`, and copy `examples/vbox-manage.example.json` to `~/.config/novee/vbox-manage.json`. The script creates `~/.ssh/novee-vms` on first use for logging in to the VMs it creates.
+
+## 7. Exec approvals
 
 `config/exec-approvals.json` is the policy that lets Novee run skill scripts and read-only commands freely and asks the owner for everything else. Apply it with `openclaw approvals set --file config/exec-approvals.json`. It is not applied automatically by a pull, on purpose: a change to the repository must not be able to widen what the agent may run.
 
@@ -64,6 +82,7 @@ On the VM: create the key with `ssh-keygen -t ed25519 -N "" -f ~/.ssh/gpu-stats`
 
 ```bash
 python3 skills/repo-sync/tests/test_reposync.py
+python3 skills/vbox-manage/tests/test_novee_vbox.py
 ```
 
-Runs every sync case (pull, push, merge, conflict, privacy block, failed push) against a throwaway local remote.
+The second file checks the host helper's argument handling, the `--yes` and protected-VM guards and the SSH config entries against a fake VirtualBox. The first runs every sync case (pull, push, merge, conflict, privacy block, failed push) against a throwaway local remote.

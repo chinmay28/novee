@@ -13,11 +13,11 @@
    "allowlist": [
     {
      "pattern": "python3",
-     "argPattern": "^(-I )?/home/chinmay/\\.openclaw/workspace/skills/[a-z0-9-]+/scripts/[a-z0-9_-]+\\.py(?!.*\\bmanage\\b.*--yes)( .*)?$"
+     "argPattern": "^(-I )?/home/chinmay/\\.openclaw/workspace/skills/[a-z0-9-]+/scripts/[a-z0-9_-]+\\.py(?!.*--yes)( .*)?$"
     },
     {
      "pattern": "/usr/bin/python3*",
-     "argPattern": "^(-I )?/home/chinmay/\\.openclaw/workspace/skills/[a-z0-9-]+/scripts/[a-z0-9_-]+\\.py(?!.*\\bmanage\\b.*--yes)( .*)?$"
+     "argPattern": "^(-I )?/home/chinmay/\\.openclaw/workspace/skills/[a-z0-9-]+/scripts/[a-z0-9_-]+\\.py(?!.*--yes)( .*)?$"
     },
     {
      "pattern": "ls"

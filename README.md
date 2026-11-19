@@ -14,6 +14,7 @@ This repository is Novee's public workspace and the source of truth for it. The 
   - `gpu-stats`: what is using the host PC's GPU, loaded models, and which machine called Ollama.
   - `news-headlines`: real headlines from RSS feeds, with the same story from several outlets merged.
   - `repo-sync`: pull, push and conflict handling for this repository, with a privacy check before every push.
+  - `vbox-manage`: VirtualBox on the host PC: list, create (unattended Ubuntu), ISO search and download, start, stop, snapshots, console screenshots, SSH setup. Changes need the owner's approval; novee and umbrel are protected.
 - `config/`: the exec approval policy and the systemd timer units.
 - `examples/`: templates for the files that stay private.
 - `docs/SETUP.md`: how the pieces are installed.

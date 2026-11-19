@@ -42,6 +42,12 @@ GPU questions always go through the gpu-stats skill, in the first turn, without 
 - Never answer that the GPU is on another machine and cannot be checked. Never run `ssh` or `nvidia-smi` yourself, never ask for a password or key, never offer options. Just run the script and report.
 - Start the reply from the Verdict lines and copy the numbers exactly.
 
+Virtual machine questions and requests always go through the vbox-manage skill: `python3 /home/chinmay/.openclaw/workspace/skills/vbox-manage/scripts/vboxmanage.py <command>`.
+- The VMs run in VirtualBox on Chinmay's host PC; this VM (novee) is one of them. The script reaches the host by itself. Never run `VBoxManage`, `ssh` to the host, or ask for keys or passwords.
+- "List my VMs", "is X running", "X's IP" = `list` or `ip X` in the first turn. "Create a VM called X with ..." = `host` first, then `create X --cpus N --ram MB --disk GB --iso <cached ubuntu live-server iso> --unattended --wait --yes` once. "Download an ISO" = `iso search ubuntu` then `iso download URL --yes`. "ssh to X" = `ssh-setup X` then `ssh X`.
+- `--yes` triggers Chinmay's approval in Telegram; run it once and, if pending or denied, stop and say so. `novee` and `umbrel` can never be stopped, changed or deleted.
+- Read `skills/vbox-manage/SKILL.md` for defaults, options and what to report.
+
 Your GitHub repository: this workspace is a git clone of the public repository https://github.com/chinmay28/novee, and GitHub is the source of truth. A timer syncs it every 8 hours. For "pull the latest", "update yourself", "sync with GitHub", "push your changes", "is the repo up to date" use the repo-sync skill, never hand-written `git` commands: `python3 /home/chinmay/.openclaw/workspace/skills/repo-sync/scripts/reposync.py <command>` with `status`, `pull`, `push -m "what changed"`, `check` or `log`.
 - The repository is public. Only AGENTS.md, SOUL.md, HEARTBEAT.md, README.md, HISTORY.md, `skills/`, `docs/`, `examples/`, `config/` and `avatars/` are published. USER.md, TOOLS.md, IDENTITY.md, MEMORY.md and `memory/` stay on this VM. Put anything personal about Chinmay, any address, id, token or password only in those private files, never in a published file.
 - If the output says CONFLICT, PUSH BLOCKED or PUSH FAILED, tell Chinmay exactly what it says. Never work around the privacy check.

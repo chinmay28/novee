@@ -1,0 +1,907 @@
+#!/usr/bin/env python3
+"""novee-vbox: VirtualBox management for the novee VM, run on the host as an SSH forced command.
+
+The VM's skill script sends one command line (SSH_ORIGINAL_COMMAND); this prints one JSON object.
+Anything that changes state needs the literal argument --yes, and VMs listed in
+~/.config/novee/vbox-protected.txt (default: novee, umbrel) can never be stopped, changed or deleted.
+
+Commands:
+  host                                  host resources, bridged interfaces, cached ISOs
+  list                                  all VMs with state, cpus, memory, network, IP
+  info NAME                             details for one VM (+ login hints, install phase)
+  ip NAME                               current IP of a VM (mDNS name, then ARP by MAC)
+  iso list | iso search DISTRO [VER] | iso download URL [--name N] | iso status | iso verify NAME
+  create NAME --iso FILE|URL-NAME --cpus N --ram MB --disk GB [--net bridged|nat] [--bridge IF]
+         [--user U] [--password P|auto] [--ssh-key "ssh-ed25519 ..."]... [--unattended] [--ostype T] --yes
+  install-status NAME                   phase of an unattended install (installing/booting/running)
+  start|stop|poweroff|reset|pause|resume NAME --yes
+  delete NAME --yes                     unregister and delete all files (VM must be off)
+  modify NAME [--cpus N] [--ram MB] [--net bridged|nat] [--bridge IF] --yes   (VM must be off)
+  snapshot NAME list | take SNAP --yes | restore SNAP --yes | delete SNAP --yes
+  screenshot NAME                       PNG of the console, base64 in the JSON
+  log NAME [--lines N]                  tail of VBox.log
+  ssh-setup NAME [--user U] [--key PUB] make sure PUB (or the host's key) can log in; add a Host entry
+"""
+import base64, json, os, re, shlex, shutil, subprocess, sys, time, tempfile, urllib.request
+from pathlib import Path
+
+HOME = Path.home()
+VBOX = shutil.which("VBoxManage") or "/usr/bin/VBoxManage"
+VM_ROOT = HOME / "VirtualBox VMs"
+ISO_DIRS = [VM_ROOT / "iso", HOME / "Downloads" / "novee-iso"]
+PROTECTED_FILE = HOME / ".config" / "novee" / "vbox-protected.txt"
+META = "novee-vbox.json"
+SSH_CONFIG = HOME / ".ssh" / "config"
+HOST_PUBKEYS = [HOME / ".ssh" / "id_ed25519.pub"]
+NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9-]{0,30}$")
+MUTATING = {"create", "start", "stop", "poweroff", "reset", "pause", "resume", "delete", "modify", "finalize"}
+UA = "novee-vbox/1.0"
+
+
+class Fail(Exception):
+    pass
+
+
+def run(cmd, timeout=120, check=True, **kw):
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, **kw)
+    except subprocess.TimeoutExpired:
+        raise Fail(f"timed out: {' '.join(cmd[:3])}")
+    if check and p.returncode != 0:
+        err = (p.stderr.strip() or p.stdout.strip()).splitlines()
+        raise Fail((err[-1] if err else f"{cmd[0]} failed") + f" (rc={p.returncode})")
+    return p.stdout
+
+
+def vbm(*args, **kw):
+    return run([VBOX, *args], **kw)
+
+
+def protected():
+    names = {"novee", "umbrel"}
+    if PROTECTED_FILE.exists():
+        names = {l.strip() for l in PROTECTED_FILE.read_text().splitlines() if l.strip() and not l.startswith("#")}
+    return names
+
+
+def vm_names():
+    return re.findall(r'^"([^"]+)"', vbm("list", "vms"), re.M)
+
+
+def need_vm(name):
+    if name not in vm_names():
+        raise Fail(f"no VM named '{name}' (have: {', '.join(vm_names())})")
+
+
+def vminfo(name):
+    out = vbm("showvminfo", name, "--machinereadable")
+    d = {}
+    for line in out.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            d[k.strip('"')] = v.strip().strip('"')
+    return d
+
+
+def meta_path(name):
+    folder = vminfo(name).get("CfgFile", "")
+    return Path(folder).parent / META if folder else VM_ROOT / name / META
+
+
+def load_meta(name):
+    p = meta_path(name)
+    try:
+        return json.loads(p.read_text())
+    except Exception:
+        return {}
+
+
+def save_meta(name, m):
+    p = meta_path(name)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(m, indent=1))
+    p.chmod(0o600)
+
+
+def mac_of(d):
+    m = d.get("macaddress1", "")
+    return ":".join(m[i:i + 2] for i in range(0, 12, 2)).lower() if len(m) == 12 else ""
+
+
+def find_ip(name, d=None):
+    d = d or vminfo(name)
+    if d.get("VMState") != "running":
+        return None
+    if d.get("nic1") == "bridged":
+        try:
+            out = run(["getent", "hosts", f"{name}.local"], timeout=5, check=False)
+            m = re.match(r"(\S+)\s", out)
+            if m and not m.group(1).startswith("fe80"):
+                return m.group(1)
+        except Fail:
+            pass
+        mac = mac_of(d)
+        if mac:
+            out = run(["ip", "-4", "neigh"], timeout=5, check=False)
+            for line in out.splitlines():
+                if mac in line.lower() and "FAILED" not in line:
+                    return line.split()[0]
+    elif d.get("nic1") == "nat":
+        fw = [v for k, v in d.items() if k.startswith("Forwarding(")]
+        for f in fw:
+            parts = f.split(",")
+            if len(parts) >= 6 and parts[5] == "22":
+                return f"127.0.0.1:{parts[3]} (NAT port forward on the host)"
+    return None
+
+
+def summarize(name, d=None):
+    d = d or vminfo(name)
+    m = load_meta(name)
+    nic = d.get("nic1", "none")
+    net = nic + (f" on {d.get('bridgeadapter1')}" if nic == "bridged" else "")
+    return {"name": name, "state": d.get("VMState"), "cpus": int(d.get("cpus", 0)), "memory_mb": int(d.get("memory", 0)),
+            "network": net, "mac": mac_of(d), "ip": find_ip(name, d), "ostype": d.get("ostype"),
+            "protected": name in protected(), "user": m.get("user"), "phase": m.get("phase"),
+            "created": m.get("created"), "folder": str(Path(d.get("CfgFile", "")).parent) if d.get("CfgFile") else None}
+
+
+# ---------------- host / list / info ----------------
+def cmd_host(a):
+    ver = vbm("--version").strip()
+    cpus = os.cpu_count()
+    mem = {}
+    for line in Path("/proc/meminfo").read_text().splitlines():
+        k, v = line.split(":", 1)
+        if k in ("MemTotal", "MemAvailable"):
+            mem[k] = int(v.split()[0]) // 1024
+    st = shutil.disk_usage(VM_ROOT)
+    ifs, cur = [], {}
+    for line in vbm("list", "bridgedifs").splitlines():
+        if line.startswith("Name:"):
+            cur = {"name": line.split(":", 1)[1].strip()}
+        elif line.startswith("IPAddress:"):
+            cur["ip"] = line.split(":", 1)[1].strip()
+        elif line.startswith("Status:"):
+            cur["status"] = line.split(":", 1)[1].strip()
+            if cur.get("ip") not in ("0.0.0.0", "") and cur["status"] == "Up" and not re.match(r"(docker|veth|virbr|br-|vmsmith)", cur["name"]):
+                ifs.append(cur)
+    running = sum(1 for n in vm_names() if vminfo(n).get("VMState") == "running")
+    used_cpus = sum(int(vminfo(n).get("cpus", 0)) for n in vm_names() if vminfo(n).get("VMState") == "running")
+    used_mem = sum(int(vminfo(n).get("memory", 0)) for n in vm_names() if vminfo(n).get("VMState") == "running")
+    return {"virtualbox": ver, "host_cpus": cpus, "host_memory_mb": mem.get("MemTotal"), "host_memory_available_mb": mem.get("MemAvailable"),
+            "vm_folder": str(VM_ROOT), "vm_folder_free_gb": round(st.free / 1024 ** 3, 1),
+            "vms_total": len(vm_names()), "vms_running": running, "cpus_assigned_to_running_vms": used_cpus,
+            "memory_assigned_to_running_vms_mb": used_mem, "default_bridge": default_bridge(), "bridged_interfaces": ifs,
+            "isos": cmd_iso_list(None)["isos"], "protected_vms": sorted(protected())}
+
+
+def default_bridge():
+    out = run(["ip", "route", "show", "default"], timeout=5, check=False)
+    m = re.search(r"dev (\S+)", out)
+    return m.group(1) if m else "wlo1"
+
+
+def cmd_list(a):
+    return {"vms": [summarize(n) for n in vm_names()]}
+
+
+def cmd_info(a):
+    name = a.get_name()
+    need_vm(name)
+    d = vminfo(name)
+    s = summarize(name, d)
+    s.update({"firmware": d.get("firmware"), "boot1": d.get("boot1"), "vram_mb": d.get("vram"),
+              "disks": [v for k, v in d.items() if re.match(r'^SATA-\d-\d$', k) or re.match(r'^IDE-\d-\d$', k)],
+              "snapshots": snapshot_list(name), "ssh": ssh_hint(name, s)})
+    m = load_meta(name)
+    if m:
+        s["install"] = {k: m.get(k) for k in ("phase", "iso", "unattended", "ssh_keys", "log")}
+    return s
+
+
+def ssh_hint(name, s):
+    if not s.get("ip"):
+        return None
+    user = s.get("user") or "chinmay"
+    return f"ssh {user}@{s['ip']}" if ":" not in s["ip"] else f"ssh -p {s['ip'].split(':')[1].split()[0]} {user}@127.0.0.1"
+
+
+def cmd_ip(a):
+    name = a.get_name()
+    need_vm(name)
+    return {"name": name, "ip": find_ip(name), "mdns": f"{name}.local"}
+
+
+# ---------------- ISO ----------------
+CATALOG = {
+    "ubuntu": {"index": "https://releases.ubuntu.com/", "ostype": "Ubuntu_64", "unattended": True},
+    "debian": {"index": "https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/", "ostype": "Debian_64", "unattended": False},
+    "alpine": {"index": "https://dl-cdn.alpinelinux.org/alpine/latest-stable/releases/x86_64/", "ostype": "Linux_64", "unattended": False},
+}
+
+
+def fetch(url, timeout=30, tries=3):
+    last = None
+    for i in range(tries):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return r.read().decode("utf-8", "ignore")
+        except Exception as e:          # transient TLS/DNS hiccups are common on release mirrors
+            last = e; time.sleep(2 * (i + 1))
+    raise Fail(f"could not fetch {url}: {last}")
+
+
+def cmd_iso_list(a):
+    isos = []
+    for d in ISO_DIRS:
+        if d.exists():
+            for f in sorted(d.glob("*.iso")):
+                isos.append({"name": f.name, "path": str(f), "size_gb": round(f.stat().st_size / 1024 ** 3, 2),
+                             "verified": (f.with_suffix(".iso.verified")).exists(),
+                             "downloading": f.with_suffix(".iso.part").exists()})
+            for f in sorted(d.glob("*.iso.part")):
+                isos.append({"name": f.name[:-5], "path": str(f)[:-5], "size_gb": round(f.stat().st_size / 1024 ** 3, 2),
+                             "verified": False, "downloading": True})
+    return {"isos": isos, "iso_dir": str(ISO_DIRS[0])}
+
+
+def cmd_iso_search(a):
+    distro = (a.args[0] if a.args else "ubuntu").lower()
+    want = a.args[1] if len(a.args) > 1 else None
+    if distro not in CATALOG:
+        raise Fail(f"unknown distro '{distro}'; known: {', '.join(CATALOG)}")
+    c = CATALOG[distro]
+    results = []
+    if distro == "ubuntu":
+        vers = sorted(set(re.findall(r'href="(\d+\.\d+(?:\.\d+)?)/"', fetch(c["index"]))),
+                      key=lambda v: [int(x) for x in v.split(".")])
+        if want:
+            vers = [v for v in vers if v.startswith(want)]
+        # newest point release of each matching series; LTS are even-year .04 releases
+        best = {}
+        for v in vers:
+            best[".".join(v.split(".")[:2])] = v
+        for v in list(best.values())[-4:]:
+            try:
+                page = fetch(c["index"] + v + "/")
+            except Exception:
+                continue
+            for iso in sorted(set(re.findall(r'href="(ubuntu-[^"]+-amd64\.iso)"', page))):
+                kind = "server" if "live-server" in iso else "desktop"
+                results.append({"distro": "ubuntu", "version": v, "name": iso, "kind": kind,
+                                "url": c["index"] + v + "/" + iso, "checksums": c["index"] + v + "/SHA256SUMS",
+                                "unattended_supported": kind == "server",
+                                "lts": int(v.split(".")[0]) % 2 == 0 and v.split(".")[1] == "04"})
+    elif distro == "debian":
+        page = fetch(c["index"])
+        for iso in sorted(set(re.findall(r'href="(debian-\d[^"]*amd64-netinst\.iso)"', page))):
+            ver = re.search(r"debian-(\d+\.\d+\.\d+)", iso).group(1)
+            if want and not ver.startswith(want):
+                continue
+            results.append({"distro": "debian", "version": ver, "name": iso, "kind": "netinst",
+                            "url": c["index"] + iso, "checksums": c["index"] + "SHA256SUMS", "unattended_supported": False})
+    elif distro == "alpine":
+        page = fetch(c["index"])
+        for iso in sorted(set(re.findall(r'(alpine-(?:virt|standard|extended)-\d[\d.]*-x86_64\.iso)', page))):
+            ver = re.search(r"-(\d[\d.]*)-x86_64", iso).group(1)
+            if want and not ver.startswith(want):
+                continue
+            results.append({"distro": "alpine", "version": ver, "name": iso, "kind": iso.split("-")[1],
+                            "url": c["index"] + iso, "checksums": c["index"] + iso + ".sha256", "unattended_supported": False})
+    cached = {i["name"] for i in cmd_iso_list(None)["isos"]}
+    for r in results:
+        r["cached"] = r["name"] in cached
+    return {"distro": distro, "results": results,
+            "note": "Ubuntu live-server ISOs support unattended install (autoinstall). Other ISOs are attached for a manual install over the console."}
+
+
+def iso_target(name):
+    ISO_DIRS[0].mkdir(parents=True, exist_ok=True)
+    return ISO_DIRS[0] / name
+
+
+def cmd_iso_download(a):
+    if not a.args:
+        raise Fail("iso download needs a URL (from `iso search`)")
+    url = a.args[0]
+    if not re.match(r"^https?://", url):
+        raise Fail("iso download needs an http(s) URL")
+    name = a.opt("name") or url.rsplit("/", 1)[-1]
+    if not name.endswith(".iso") or "/" in name:
+        raise Fail("ISO name must end in .iso")
+    dest = iso_target(name)
+    if dest.exists():
+        return {"status": "already cached", "path": str(dest), "name": name}
+    part = dest.with_suffix(".iso.part")
+    if part.exists() and any(p.exists() for p in [dest.with_suffix(".iso.pid")]):
+        return {"status": "already downloading", "path": str(dest), "name": name}
+    log = dest.with_suffix(".iso.log")
+    cmd = (f"curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors -A {shlex.quote(UA)} -o {shlex.quote(str(part))} "
+           f"{shlex.quote(url)} && mv {shlex.quote(str(part))} {shlex.quote(str(dest))} && echo DONE || echo FAILED")
+    p = subprocess.Popen(["bash", "-c", cmd], stdout=open(log, "w"), stderr=subprocess.STDOUT,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+    dest.with_suffix(".iso.pid").write_text(str(p.pid))
+    dest.with_suffix(".iso.url").write_text(url)
+    total = None
+    try:
+        req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            total = int(r.headers.get("Content-Length") or 0) or None
+    except Exception:
+        pass
+    if total:
+        dest.with_suffix(".iso.total").write_text(str(total))
+    return {"status": "started", "name": name, "path": str(dest), "url": url, "total_gb": round(total / 1024 ** 3, 2) if total else None,
+            "hint": "check progress with `iso status`"}
+
+
+def cmd_iso_status(a):
+    items = []
+    for d in ISO_DIRS:
+        if not d.exists():
+            continue
+        for pidf in d.glob("*.iso.pid"):
+            base = pidf.with_suffix("")      # X.iso
+            name = base.name
+            part = base.with_suffix(".iso.part")
+            log = base.with_suffix(".iso.log")
+            total = int(base.with_suffix(".iso.total").read_text()) if base.with_suffix(".iso.total").exists() else None
+            logtxt = log.read_text().strip() if log.exists() else ""
+            if base.exists() and "DONE" in logtxt:
+                st = "done"
+            elif "FAILED" in logtxt:
+                st = "failed"
+            elif part.exists():
+                st = "downloading"
+            else:
+                st = "unknown"
+            size = part.stat().st_size if part.exists() else (base.stat().st_size if base.exists() else 0)
+            items.append({"name": name, "status": st, "downloaded_gb": round(size / 1024 ** 3, 2),
+                          "total_gb": round(total / 1024 ** 3, 2) if total else None,
+                          "percent": round(100 * size / total, 1) if total else None,
+                          "error": logtxt.splitlines()[-1] if st == "failed" and logtxt else None})
+            if st in ("done", "failed"):
+                for suf in (".iso.pid", ".iso.total", ".iso.log"):
+                    try: base.with_suffix(suf).unlink()
+                    except OSError: pass
+    return {"downloads": items or "none in progress"}
+
+
+def cmd_iso_verify(a):
+    if not a.args:
+        raise Fail("iso verify needs the ISO name")
+    name = a.args[0]
+    path = next((Path(i["path"]) for i in cmd_iso_list(None)["isos"] if i["name"] == name and not i["downloading"]), None)
+    if not path:
+        raise Fail(f"no cached ISO named {name}")
+    urlf = path.with_suffix(".iso.url")
+    url = urlf.read_text().strip() if urlf.exists() else None
+    sums = None
+    if url:
+        base = url.rsplit("/", 1)[0] + "/"
+        for cand in (base + "SHA256SUMS", url + ".sha256"):
+            try:
+                sums = fetch(cand); break
+            except Exception:
+                continue
+    if not sums and "ubuntu-" in name:
+        ver = re.search(r"ubuntu-(\d+\.\d+(?:\.\d+)?)", name).group(1)
+        sums = fetch(f"https://releases.ubuntu.com/{ver}/SHA256SUMS")
+    if not sums:
+        raise Fail("no checksum file found for this ISO (download it with `iso download` so the source URL is known)")
+    m = re.search(r"([0-9a-f]{64})\s+\*?" + re.escape(name), sums)
+    if not m:
+        raise Fail("ISO name not present in the checksum file")
+    out = run(["sha256sum", str(path)], timeout=900)
+    ok = out.split()[0] == m.group(1)
+    if ok:
+        path.with_suffix(".iso.verified").write_text(m.group(1))
+    return {"name": name, "verified": ok, "expected": m.group(1), "actual": out.split()[0]}
+
+
+# ---------------- create ----------------
+def resolve_iso(spec):
+    p = Path(spec)
+    if p.is_absolute() and p.exists():
+        return p
+    for i in cmd_iso_list(None)["isos"]:
+        if i["name"] == spec and not i["downloading"]:
+            return Path(i["path"])
+    raise Fail(f"ISO '{spec}' is not cached; use `iso search` and `iso download` first")
+
+
+def build_autoinstall(name, src_iso, user, pw_hash, keys, tz):
+    """Remaster an Ubuntu live-server ISO so it installs by itself and powers off."""
+    folder = VM_ROOT / name
+    seed = folder / "seed"
+    seed.mkdir(parents=True, exist_ok=True)
+    (seed / "meta-data").write_text(f"instance-id: {name}-001\nlocal-hostname: {name}\n")
+    keys_yaml = "".join(f'      - "{k}"\n' for k in keys)
+    (seed / "user-data").write_text(f"""#cloud-config
+autoinstall:
+  version: 1
+  locale: en_US.UTF-8
+  keyboard:
+    layout: us
+  timezone: {tz}
+  identity:
+    hostname: {name}
+    username: {user}
+    password: "{pw_hash}"
+  ssh:
+    install-server: true
+    allow-pw: true
+    authorized-keys:
+{keys_yaml}  storage:
+    layout:
+      name: direct
+  packages:
+    - curl
+    - git
+    - ca-certificates
+    - avahi-daemon
+    - jq
+  updates: security
+  late-commands:
+    - echo '{user} ALL=(ALL) NOPASSWD:ALL' > /target/etc/sudoers.d/90-{user}
+    - chmod 440 /target/etc/sudoers.d/90-{user}
+  shutdown: poweroff
+""")
+    (seed / "user-data").chmod(0o600)
+    out = folder / f"{name}-autoinstall.iso"
+    with tempfile.TemporaryDirectory() as tmp:
+        grub = Path(tmp) / "grub.cfg"
+        run(["xorriso", "-osirrox", "on", "-indev", str(src_iso), "-extract", "/boot/grub/grub.cfg", str(grub)], timeout=120)
+        grub.chmod(0o644)
+        g = grub.read_text()
+        g = re.sub(r"^set timeout=.*$", "set timeout=1", g, flags=re.M)
+        g2 = re.sub(r"(linux\s+/casper/vmlinuz)\s+---", r"\1 autoinstall ds=nocloud\;s=/cdrom/nocloud/ ---", g)
+        if g2 == g:
+            raise Fail("could not patch grub.cfg; is this an Ubuntu live-server ISO?")
+        grub.write_text(g2)
+        if out.exists():
+            out.unlink()
+        run(["xorriso", "-indev", str(src_iso), "-outdev", str(out), "-map", str(grub), "/boot/grub/grub.cfg",
+             "-map", str(seed), "/nocloud", "-boot_image", "any", "replay"], timeout=900)
+    return out
+
+
+def spawn_watcher(name):
+    """Background: wait for the installer to power the VM off, detach the ISO, boot from disk."""
+    code = f"""
+import json, re, subprocess, time, sys
+from pathlib import Path
+name = {name!r}; vbox = {VBOX!r}; meta = Path({str(meta_path(name))!r})
+def state():
+    o = subprocess.run([vbox, "showvminfo", name, "--machinereadable"], capture_output=True, text=True).stdout
+    m = re.search(r'^VMState="(\\w+)"', o, re.M); return m.group(1) if m else "unknown"
+def setphase(p, extra=None):
+    try: d = json.loads(meta.read_text())
+    except Exception: d = {{}}
+    d["phase"] = p; d["phase_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    if extra: d.update(extra)
+    meta.write_text(json.dumps(d, indent=1))
+t0 = time.time()
+while time.time() - t0 < 3600:
+    s = state()
+    if s in ("poweroff", "aborted"):
+        break
+    time.sleep(10)
+else:
+    setphase("install-timeout"); sys.exit(1)
+if s == "aborted":
+    setphase("install-aborted"); sys.exit(1)
+subprocess.run([vbox, "storageattach", name, "--storagectl", "SATA", "--port", "1", "--device", "0", "--type", "dvddrive", "--medium", "emptydrive"])
+subprocess.run([vbox, "modifyvm", name, "--boot1", "disk", "--boot2", "none"])
+setphase("booting")
+subprocess.run([vbox, "startvm", name, "--type", "headless"], capture_output=True)
+for _ in range(60):
+    time.sleep(5)
+    o = subprocess.run(["getent", "hosts", name + ".local"], capture_output=True, text=True).stdout.split()
+    if o and not o[0].startswith("fe80"):
+        setphase("running", {{"ip": o[0]}}); sys.exit(0)
+setphase("running", {{"ip": None}})
+"""
+    log = VM_ROOT / name / "install-watcher.log"
+    subprocess.Popen([sys.executable, "-c", code], stdout=open(log, "a"), stderr=subprocess.STDOUT,
+                     stdin=subprocess.DEVNULL, start_new_session=True)
+    return str(log)
+
+
+def cmd_create(a):
+    name = a.get_name()
+    if not NAME_RE.match(name):
+        raise Fail("VM name: letters, digits and dashes only, starting with a letter")
+    if name in vm_names():
+        raise Fail(f"a VM named '{name}' already exists")
+    cpus = int(a.opt("cpus") or 2)
+    ram = int(a.opt("ram") or 2048)
+    disk = int(a.opt("disk") or 20)
+    net = (a.opt("net") or "bridged").lower()
+    bridge = a.opt("bridge") or default_bridge()
+    user = a.opt("user") or "chinmay"
+    unattended = a.flag("unattended")
+    iso = resolve_iso(a.opt("iso")) if a.opt("iso") else None
+    if cpus < 1 or cpus > os.cpu_count():
+        raise Fail(f"cpus must be 1..{os.cpu_count()}")
+    if ram < 512 or ram > 65536:
+        raise Fail("ram must be 512..65536 MB")
+    if disk < 4 or disk > 2000:
+        raise Fail("disk must be 4..2000 GB")
+    if net not in ("bridged", "nat"):
+        raise Fail("net must be bridged or nat")
+    if not NAME_RE.match(user):
+        raise Fail("bad user name")
+    ostype = a.opt("ostype") or ("Ubuntu_64" if iso and "ubuntu" in iso.name.lower() else "Debian_64" if iso and "debian" in iso.name.lower() else "Linux_64")
+    if unattended and not (iso and "live-server" in iso.name and "ubuntu" in iso.name.lower()):
+        raise Fail("unattended install needs an Ubuntu live-server ISO")
+    keys = a.opts("ssh-key")
+    for k in HOST_PUBKEYS:
+        if k.exists():
+            keys.append(k.read_text().strip())
+    keys = [k for k in dict.fromkeys(keys) if re.match(r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-\S+) \S+", k)]
+    password = a.opt("password") or "auto"
+    if password == "auto":
+        password = base64.b64encode(os.urandom(12)).decode().translate(str.maketrans("", "", "/+=")).strip()[:16]
+    folder = VM_ROOT / name
+    vbm("createvm", "--name", name, "--ostype", ostype, "--register")
+    try:
+        vbm("modifyvm", name, "--memory", str(ram), "--cpus", str(cpus), "--firmware", "efi", "--graphicscontroller", "vmsvga",
+            "--vram", "16", "--audio-driver", "none", "--usb", "off", "--rtc-use-utc", "on", "--pae", "on",
+            "--boot1", "dvd" if iso else "disk", "--boot2", "disk", "--boot3", "none", "--boot4", "none")
+        if net == "bridged":
+            vbm("modifyvm", name, "--nic1", "bridged", "--bridge-adapter1", bridge, "--nic-type1", "virtio")
+        else:
+            vbm("modifyvm", name, "--nic1", "nat", "--nic-type1", "virtio", "--nat-pf1", f"ssh,tcp,127.0.0.1,{nat_port(name)},,22")
+        vdi = folder / f"{name}.vdi"
+        vbm("createmedium", "disk", "--filename", str(vdi), "--size", str(disk * 1024), "--format", "VDI", timeout=300)
+        vbm("storagectl", name, "--name", "SATA", "--add", "sata", "--controller", "IntelAhci", "--portcount", "2", "--bootable", "on")
+        vbm("storageattach", name, "--storagectl", "SATA", "--port", "0", "--device", "0", "--type", "hdd", "--medium", str(vdi))
+        attach = None
+        if iso:
+            if unattended:
+                pw_hash = run(["openssl", "passwd", "-6", password], timeout=30).strip()
+                attach = build_autoinstall(name, iso, user, pw_hash, keys, a.opt("timezone") or host_tz())
+            else:
+                attach = iso
+            vbm("storageattach", name, "--storagectl", "SATA", "--port", "1", "--device", "0", "--type", "dvddrive", "--medium", str(attach))
+        creds = folder / "CREDENTIALS.txt"
+        creds.write_text(f"user: {user}\npassword: {password}\n")
+        creds.chmod(0o600)
+        meta = {"name": name, "created": time.strftime("%Y-%m-%dT%H:%M:%S"), "user": user, "iso": str(iso) if iso else None,
+                "unattended": unattended, "ssh_keys": [k.split()[-1] if len(k.split()) > 2 else k[:30] for k in keys],
+                "net": net, "bridge": bridge if net == "bridged" else None, "phase": "created"}
+        save_meta(name, meta)
+        log = None
+        if a.flag("start") or unattended:
+            vbm("startvm", name, "--type", "headless", timeout=120)
+            meta["phase"] = "installing" if unattended else "running-installer" if iso else "running"
+            if unattended:
+                log = spawn_watcher(name)
+                meta["log"] = log
+            save_meta(name, meta)
+    except Exception:
+        try:
+            vbm("unregistervm", name, "--delete-all", check=False)
+        except Exception:
+            pass
+        raise
+    return {"created": summarize(name), "user": user, "password_file": str(folder / "CREDENTIALS.txt"),
+            "unattended": unattended, "ssh_keys_installed": len(keys),
+            "next": ("installing by itself; poll `install-status` (about 7-10 minutes), then `ssh-setup`" if unattended else
+                     "ISO attached; start it and finish the install over the console (screenshot command shows progress)" if iso else
+                     "empty VM created; attach an ISO or start it")}
+
+
+def nat_port(name):
+    return 2200 + (sum(ord(c) for c in name) % 700)
+
+
+def host_tz():
+    try:
+        return Path("/etc/timezone").read_text().strip() or "UTC"
+    except OSError:
+        try:
+            return os.readlink("/etc/localtime").split("zoneinfo/")[-1]
+        except OSError:
+            return "UTC"
+
+
+def cmd_install_status(a):
+    name = a.get_name()
+    need_vm(name)
+    m = load_meta(name)
+    d = vminfo(name)
+    phase = m.get("phase")
+    if phase in ("installing",) and d.get("VMState") == "poweroff":
+        phase = "installed, finalizing"
+    ip = m.get("ip") or find_ip(name, d)
+    return {"name": name, "phase": phase, "vm_state": d.get("VMState"), "ip": ip, "since": m.get("phase_at") or m.get("created"),
+            "user": m.get("user"), "done": phase == "running" and bool(ip)}
+
+
+# ---------------- power / delete / modify ----------------
+def guard(name, action):
+    need_vm(name)
+    if name in protected():
+        raise Fail(f"'{name}' is protected; refusing to {action} it (edit {PROTECTED_FILE} on the host to change)")
+
+
+def cmd_power(a):
+    name = a.get_name()
+    op = a.cmd
+    if op == "start":
+        need_vm(name)
+        if vminfo(name).get("VMState") == "running":
+            return {"name": name, "result": "already running"}
+        vbm("startvm", name, "--type", "headless", timeout=120)
+    else:
+        guard(name, op)
+        if vminfo(name).get("VMState") not in ("running", "paused"):
+            return {"name": name, "result": f"not running (state {vminfo(name).get('VMState')})"}
+        ctl = {"stop": "acpipowerbutton", "poweroff": "poweroff", "reset": "reset", "pause": "pause", "resume": "resume"}[op]
+        vbm("controlvm", name, ctl, timeout=60)
+        if op == "stop":
+            for _ in range(30):
+                time.sleep(2)
+                if vminfo(name).get("VMState") == "poweroff":
+                    break
+    time.sleep(1)
+    return {"name": name, "result": op, "state": vminfo(name).get("VMState")}
+
+
+def cmd_delete(a):
+    name = a.get_name()
+    guard(name, "delete")
+    if vminfo(name).get("VMState") != "poweroff":
+        raise Fail(f"'{name}' is {vminfo(name).get('VMState')}; power it off first (`poweroff {name} --yes`)")
+    folder = Path(vminfo(name).get("CfgFile", "")).parent
+    vbm("unregistervm", name, "--delete-all", timeout=300)
+    if folder.exists() and folder.parent == VM_ROOT:
+        shutil.rmtree(folder, ignore_errors=True)
+    for ent in ssh_config_entries():
+        if ent == name:
+            remove_ssh_config(name)
+    return {"name": name, "result": "deleted (VM, disks, snapshots and folder)"}
+
+
+def cmd_modify(a):
+    name = a.get_name()
+    guard(name, "modify")
+    if vminfo(name).get("VMState") != "poweroff":
+        raise Fail("the VM must be powered off to change its hardware")
+    changes = {}
+    if a.opt("cpus"):
+        vbm("modifyvm", name, "--cpus", str(int(a.opt("cpus")))); changes["cpus"] = int(a.opt("cpus"))
+    if a.opt("ram"):
+        vbm("modifyvm", name, "--memory", str(int(a.opt("ram")))); changes["memory_mb"] = int(a.opt("ram"))
+    if a.opt("net") == "bridged":
+        vbm("modifyvm", name, "--nic1", "bridged", "--bridge-adapter1", a.opt("bridge") or default_bridge()); changes["network"] = "bridged"
+    elif a.opt("net") == "nat":
+        vbm("modifyvm", name, "--nic1", "nat"); changes["network"] = "nat"
+    elif a.opt("bridge"):
+        vbm("modifyvm", name, "--bridge-adapter1", a.opt("bridge")); changes["bridge"] = a.opt("bridge")
+    if not changes:
+        raise Fail("nothing to change: give --cpus, --ram, --net or --bridge")
+    return {"name": name, "changed": changes, "now": summarize(name)}
+
+
+# ---------------- snapshots / screenshot / log ----------------
+def snapshot_list(name):
+    out = vbm("snapshot", name, "list", "--machinereadable", check=False)
+    names = re.findall(r'^SnapshotName(?:-\d+)*="([^"]+)"', out, re.M)
+    cur = re.search(r'^CurrentSnapshotName="([^"]+)"', out, re.M)
+    return {"snapshots": names, "current": cur.group(1) if cur else None}
+
+
+def cmd_snapshot(a):
+    name = a.get_name()
+    need_vm(name)
+    sub = a.args[1] if len(a.args) > 1 else "list"
+    snap = a.args[2] if len(a.args) > 2 else None
+    if sub == "list":
+        return {"name": name, **snapshot_list(name)}
+    if not a.yes:
+        raise Fail(f"snapshot {sub} changes state; add --yes")
+    if not snap:
+        raise Fail("snapshot name required")
+    if sub == "take":
+        vbm("snapshot", name, "take", snap, "--live" if vminfo(name).get("VMState") == "running" else "--description", "by novee", timeout=600)
+    elif sub == "restore":
+        guard(name, "restore a snapshot on")
+        if vminfo(name).get("VMState") != "poweroff":
+            raise Fail("power the VM off before restoring a snapshot")
+        vbm("snapshot", name, "restore", snap, timeout=600)
+    elif sub == "delete":
+        guard(name, "delete a snapshot on")
+        vbm("snapshot", name, "delete", snap, timeout=600)
+    else:
+        raise Fail("snapshot sub-command must be list, take, restore or delete")
+    return {"name": name, "result": f"snapshot {sub} {snap}", **snapshot_list(name)}
+
+
+def cmd_screenshot(a):
+    name = a.get_name()
+    need_vm(name)
+    if vminfo(name).get("VMState") != "running":
+        raise Fail("the VM is not running, nothing to show")
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
+        path = f.name
+    vbm("controlvm", name, "screenshotpng", path, timeout=30)
+    data = Path(path).read_bytes()
+    os.unlink(path)
+    return {"name": name, "png_base64": base64.b64encode(data).decode(), "bytes": len(data)}
+
+
+def cmd_log(a):
+    name = a.get_name()
+    need_vm(name)
+    n = int(a.opt("lines") or 40)
+    logf = Path(vminfo(name).get("CfgFile", "")).parent / "Logs" / "VBox.log"
+    if not logf.exists():
+        raise Fail("no VBox.log yet")
+    lines = logf.read_text(errors="ignore").splitlines()
+    return {"name": name, "lines": lines[-n:]}
+
+
+# ---------------- ssh ----------------
+def ssh_config_entries():
+    if not SSH_CONFIG.exists():
+        return []
+    return re.findall(r"^Host (\S+)\s*# managed by novee-vbox", SSH_CONFIG.read_text(), re.M)
+
+
+def remove_ssh_config(name):
+    txt = SSH_CONFIG.read_text()
+    txt = re.sub(rf"\nHost {re.escape(name)}\s*# managed by novee-vbox\n(?:[ \t]+.*\n)*", "\n", txt)
+    SSH_CONFIG.write_text(txt)
+
+
+def add_ssh_config(name, ip, user, port=None):
+    SSH_CONFIG.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if name in ssh_config_entries():
+        remove_ssh_config(name)
+    entry = f"\nHost {name}  # managed by novee-vbox\n  HostName {ip}\n  User {user}\n"
+    if port:
+        entry += f"  Port {port}\n"
+    entry += "  StrictHostKeyChecking accept-new\n"
+    with open(SSH_CONFIG, "a") as f:
+        f.write(entry)
+    SSH_CONFIG.chmod(0o600)
+
+
+def cmd_ssh_setup(a):
+    name = a.get_name()
+    need_vm(name)
+    m = load_meta(name)
+    user = a.opt("user") or m.get("user") or "chinmay"
+    ipraw = find_ip(name)
+    if not ipraw:
+        raise Fail("the VM has no known IP yet (is it running, and does it answer on mDNS?)")
+    port = None
+    ip = ipraw
+    if ipraw.startswith("127.0.0.1:"):
+        ip, port = "127.0.0.1", ipraw.split(":")[1].split()[0]
+    keys = a.opts("key")
+    for k in HOST_PUBKEYS:
+        if k.exists():
+            keys.append(k.read_text().strip())
+    keys = [k for k in dict.fromkeys(keys) if re.match(r"^(ssh-ed25519|ssh-rsa|ecdsa-sha2-\S+) \S+", k)]
+    base = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8", "-o", "StrictHostKeyChecking=accept-new"] + (["-p", port] if port else [])
+    target = f"{user}@{ip}"
+    # already fine with the host's own key?
+    hostkey = HOME / ".ssh" / "novee-vms"
+    if not hostkey.exists():
+        run(["ssh-keygen", "-t", "ed25519", "-N", "", "-q", "-C", "host->vms (novee-vbox)", "-f", str(hostkey)], timeout=30)
+    keys.append(hostkey.with_suffix(".pub").read_text().strip())
+    ok = run(base + ["-i", str(hostkey), "-o", "IdentitiesOnly=yes", target, "true"], timeout=20, check=False) is not None and \
+        subprocess.run(base + ["-i", str(hostkey), "-o", "IdentitiesOnly=yes", target, "true"], capture_output=True, timeout=20).returncode == 0
+    installed = []
+    if not ok:
+        creds = Path(vminfo(name).get("CfgFile", "")).parent / "CREDENTIALS.txt"
+        pw = a.opt("password")
+        if not pw and creds.exists():
+            pw = re.search(r"^password: (.*)$", creds.read_text(), re.M).group(1)
+        if not pw:
+            raise Fail("key login failed and no password is known for this VM; pass --password")
+        with tempfile.NamedTemporaryFile("w", delete=False, suffix=".sh") as f:
+            f.write("#!/bin/sh\nprintf '%s\\n' \"$NOVEE_PW\"\n"); askpass = f.name
+        os.chmod(askpass, 0o700)
+        env = dict(os.environ, SSH_ASKPASS=askpass, SSH_ASKPASS_REQUIRE="force", DISPLAY=":0", NOVEE_PW=pw)
+        script = "mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && " + \
+                 " && ".join(f"grep -qF {shlex.quote(k.split()[1])} ~/.ssh/authorized_keys || echo {shlex.quote(k)} >> ~/.ssh/authorized_keys" for k in keys) + " && echo KEYS_OK"
+        p = subprocess.run(["setsid", "-w", "ssh", "-o", "PreferredAuthentications=password", "-o", "PubkeyAuthentication=no",
+                            "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10"] + (["-p", port] if port else []) + [target, script],
+                           capture_output=True, text=True, timeout=60, env=env)
+        os.unlink(askpass)
+        if "KEYS_OK" not in p.stdout:
+            raise Fail("could not install keys with the password: " + (p.stderr.strip().splitlines() or ["no output"])[-1])
+        installed = [k.split()[-1] if len(k.split()) > 2 else "key" for k in keys]
+        ok = subprocess.run(base + ["-i", str(hostkey), "-o", "IdentitiesOnly=yes", target, "true"], capture_output=True, timeout=20).returncode == 0
+    else:
+        # key works for the host; make sure the requested extra keys are present too
+        script = " && ".join(f"grep -qF {shlex.quote(k.split()[1])} ~/.ssh/authorized_keys || echo {shlex.quote(k)} >> ~/.ssh/authorized_keys" for k in keys) + " && echo KEYS_OK"
+        p = subprocess.run(base + ["-i", str(hostkey), "-o", "IdentitiesOnly=yes", target, script], capture_output=True, text=True, timeout=30)
+        installed = [k.split()[-1] if len(k.split()) > 2 else "key" for k in keys] if "KEYS_OK" in p.stdout else []
+    add_ssh_config(name, ip, user, port)
+    return {"name": name, "ip": ip, "port": port or 22, "user": user, "key_login": ok, "keys_present": installed,
+            "host_ssh_config": f"Host {name} added to {SSH_CONFIG} (use: ssh {name})"}
+
+
+# ---------------- arg handling ----------------
+class Args:
+    def __init__(self, argv):
+        self.cmd = argv[0] if argv else "help"
+        self.args, self.kv, self.flags = [], {}, set()
+        self.multi = {}
+        i = 1
+        while i < len(argv):
+            t = argv[i]
+            if t.startswith("--"):
+                key = t[2:]
+                if key in ("yes", "unattended", "start", "json"):
+                    self.flags.add(key)
+                elif i + 1 < len(argv):
+                    self.multi.setdefault(key, []).append(argv[i + 1]); self.kv[key] = argv[i + 1]; i += 1
+                else:
+                    self.flags.add(key)
+            else:
+                self.args.append(t)
+            i += 1
+        self.yes = "yes" in self.flags
+
+    def get_name(self):
+        if not self.args:
+            raise Fail("VM name required")
+        if not NAME_RE.match(self.args[0]):
+            raise Fail("bad VM name")
+        return self.args[0]
+
+    def opt(self, k):
+        return self.kv.get(k)
+
+    def opts(self, k):
+        return list(self.multi.get(k, []))
+
+    def flag(self, k):
+        return k in self.flags
+
+
+def main():
+    raw = os.environ.get("SSH_ORIGINAL_COMMAND")
+    argv = shlex.split(raw) if raw else sys.argv[1:]
+    a = Args(argv)
+    try:
+        if a.cmd == "iso":
+            sub = a.args[0] if a.args else "list"
+            a.args = a.args[1:]
+            fn = {"list": cmd_iso_list, "search": cmd_iso_search, "download": cmd_iso_download, "status": cmd_iso_status, "verify": cmd_iso_verify}.get(sub)
+            if not fn:
+                raise Fail("iso sub-command must be list, search, download, status or verify")
+            if sub == "download" and not a.yes:
+                raise Fail("iso download writes to the host disk; add --yes")
+            res = fn(a)
+        else:
+            table = {"host": cmd_host, "list": cmd_list, "info": cmd_info, "ip": cmd_ip, "create": cmd_create,
+                     "install-status": cmd_install_status, "start": cmd_power, "stop": cmd_power, "poweroff": cmd_power,
+                     "reset": cmd_power, "pause": cmd_power, "resume": cmd_power, "delete": cmd_delete, "modify": cmd_modify,
+                     "snapshot": cmd_snapshot, "screenshot": cmd_screenshot, "log": cmd_log, "ssh-setup": cmd_ssh_setup}
+            if a.cmd in ("help", "-h", "--help"):
+                print(json.dumps({"ok": True, "help": __doc__})); return
+            fn = table.get(a.cmd)
+            if not fn:
+                raise Fail(f"unknown command '{a.cmd}'; commands: {', '.join(table)}, iso")
+            if a.cmd in MUTATING and not a.yes:
+                raise Fail(f"'{a.cmd}' changes the host; add --yes (the owner must approve)")
+            res = fn(a)
+        print(json.dumps({"ok": True, "command": a.cmd, **res}, default=str))
+    except Fail as e:
+        print(json.dumps({"ok": False, "command": a.cmd, "error": str(e)})); sys.exit(1)
+    except Exception as e:
+        print(json.dumps({"ok": False, "command": a.cmd, "error": f"{type(e).__name__}: {e}"})); sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
