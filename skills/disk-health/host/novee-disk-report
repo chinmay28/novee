@@ -659,8 +659,23 @@ def hub_verdicts(disks, kern):
 
 
 # ---------------------------------------------------------------- main
+def audit(opts):
+    """One line per report in ~/.local/state/novee-disk-report.log: when, who, which options. The owner can
+    see exactly what the agent asked for, in particular the opt-in actions."""
+    try:
+        d = os.path.expanduser("~/.local/state")
+        os.makedirs(d, exist_ok=True)
+        who = (os.environ.get("SSH_CLIENT") or "local").split()[0]
+        with open(os.path.join(d, "novee-disk-report.log"), "a") as f:
+            f.write(f"{datetime.now().astimezone().isoformat(timespec='seconds')} from={who} "
+                    f"hours={opts['hours']} selftest={opts['selftest'] or '-'} read_sample={opts['read_sample']}\n")
+    except OSError:
+        pass
+
+
 def main():
     opts = parse_args()
+    audit(opts)
     now = datetime.now().astimezone()
     rep = {"host": os.uname().nodename, "time": now.isoformat(timespec="seconds"),
            "kernel": os.uname().release, "hours": opts["hours"], "read_only": True,
