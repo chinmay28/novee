@@ -1,0 +1,4 @@
+{"data":{"getOnlineOrders":{"pageNumber":1,"pageSize":50,"totalNumberOfRecords":1,"bcOrders":[
+ {"orderHeaderId":"9001","orderPlacedDate":"2026-10-10T18:22:31","orderNumber":"1234567890","orderTotal":787.97,"status":"Delivered",
+  "orderLineItems":[{"itemNumber":"1611111","itemDescription":"Example Hybrid Mattress, Queen","lineNumber":1,"status":"Delivered"}]}
+]}}}

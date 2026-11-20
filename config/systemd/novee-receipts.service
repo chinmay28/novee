@@ -1,0 +1,11 @@
+[Unit]
+Description=Fetch new shop receipts into Novee's private archive
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/novee-receipts sync costco --notify
+# Exit code 2 means "the saved sign-in expired, and the owner was told".
+SuccessExitStatus=2
+TimeoutStartSec=900

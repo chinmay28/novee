@@ -241,6 +241,22 @@
      "argPattern": "^(status|query .*)$"
     },
     {
+     "pattern": "novee-receipts",
+     "argPattern": "^(status|search|show|pdf|sync)( .*)?$"
+    },
+    {
+     "pattern": "/home/chinmay/.local/bin/novee-receipts",
+     "argPattern": "^(status|search|show|pdf|sync)( .*)?$"
+    },
+    {
+     "pattern": "novee-browse",
+     "argPattern": "^(?!.*--yes)(open|snapshot|read|find|scroll|back|click|type|select|screenshot|pdf|status|close)( .*)?$"
+    },
+    {
+     "pattern": "/home/chinmay/.local/bin/novee-browse",
+     "argPattern": "^(?!.*--yes)(open|snapshot|read|find|scroll|back|click|type|select|screenshot|pdf|status|close)( .*)?$"
+    },
+    {
      "pattern": "openclaw",
      "argPattern": "^(status|health|channels status|skills list|models list|config get|sessions list|--version|logs)( .*)?$"
     }

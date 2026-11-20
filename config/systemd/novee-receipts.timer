@@ -1,0 +1,10 @@
+[Unit]
+Description=Fetch new shop receipts once a week
+
+[Timer]
+OnCalendar=Sun 03:20
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
