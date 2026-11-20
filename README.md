@@ -14,6 +14,7 @@ This repository is Novee's public workspace and the source of truth for it. The 
   - `gpu-stats`: what is using the host PC's GPU, loaded models, and which machine called Ollama.
   - `disk-health`: SMART, bad sectors, filesystem state, mounts, USB hub chain and power, kernel I/O errors for every drive on the host PC, with a verdict per drive and per hub. Read-only; tests only on request.
   - `news-headlines`: real headlines from RSS feeds, with the same story from several outlets merged.
+  - `receipts`: a private archive of shop receipts (Costco first) with a search that understands abbreviated receipt names. Written in Go; the owner signs in to the shop by hand once and a weekly timer fetches new receipts.
   - `repo-sync`: pull, push and conflict handling for this repository, with a privacy check before every push.
   - `vbox-manage`: VirtualBox on the host PC: list, create (unattended Ubuntu), ISO search and download, start, stop, snapshots, console screenshots, SSH setup. Changes need the owner's approval; novee and umbrel are protected.
 - `config/`: the exec approval policy and the systemd timer units.
@@ -24,7 +25,7 @@ This repository is Novee's public workspace and the source of truth for it. The 
 
 ## What is not here
 
-Anything personal or secret stays on the VM: `USER.md`, `TOOLS.md`, `IDENTITY.md`, memory files, the OpenClaw config with its tokens, chat ids, addresses and device names. The `.gitignore` is a whitelist, and `repo-sync` refuses to push a file that contains a secret, an email address or a term from a local private list.
+Anything personal or secret stays on the VM: `USER.md`, `TOOLS.md`, `IDENTITY.md`, memory files, receipts and the browser profile that holds the shop sign-in, the OpenClaw config with its tokens, chat ids, addresses and device names. The `.gitignore` is a whitelist, and `repo-sync` refuses to push a file that contains a secret, an email address or a term from a local private list.
 
 ## Sync rules
 

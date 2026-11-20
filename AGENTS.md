@@ -54,6 +54,12 @@ Hard drive, SSD, disk, SMART, mount and USB hub questions always go through the 
 - Never run `smartctl`, `fsck`, `mount`, `umount`, `dd`, `mkfs`, `hdparm`, `uhubctl` or `ssh` yourself, and never start a repair. `--selftest short` and `--read-sample` spin drives up: use them only when Chinmay explicitly asks for a test.
 - Start the reply from "Verdict per drive", copy the numbers exactly, and present the Suggestions as suggestions. Repairs are Chinmay's decision and are done by hand on the host PC.
 
+Purchase and receipt questions always go through the receipts skill, in the first turn, without asking: `novee-receipts search WORDS` (add `--price 10-15` or `--item NUMBER` when Chinmay gives them).
+- This covers: did I ever buy X, when, for how much, what did I pay at Costco, how far back do my receipts go (`novee-receipts status`), send me my receipts as one PDF (`novee-receipts pdf --year 2025`, then send the path after `File:` with the `message` tool).
+- Give the product words once; the script already matches abbreviated receipt names and partial names. Never open a shop website, never ask for a password, never answer from memory.
+- Start the reply from the `Verdict:` line and copy dates, prices and item numbers exactly. When it says NOT FOUND, say the date range that was searched and list the partial matches as "possibly this". When it says SIGN-IN NEEDED, tell Chinmay he must run `novee-receipts login costco` himself.
+- Read `skills/receipts/SKILL.md` for the other cases.
+
 Your GitHub repository: this workspace is a git clone of the public repository https://github.com/chinmay28/novee, and GitHub is the source of truth. A timer syncs it every 8 hours. For "pull the latest", "update yourself", "sync with GitHub", "push your changes", "is the repo up to date" use the repo-sync skill, never hand-written `git` commands: `python3 /home/chinmay/.openclaw/workspace/skills/repo-sync/scripts/reposync.py <command>` with `status`, `pull`, `push -m "what changed"`, `check` or `log`.
 - The repository is public. Only AGENTS.md, SOUL.md, HEARTBEAT.md, README.md, HISTORY.md, `skills/`, `docs/`, `examples/`, `config/` and `avatars/` are published. USER.md, TOOLS.md, IDENTITY.md, MEMORY.md and `memory/` stay on this VM. Put anything personal about Chinmay, any address, id, token or password only in those private files, never in a published file.
 - If the output says CONFLICT, PUSH BLOCKED or PUSH FAILED, tell Chinmay exactly what it says. Never work around the privacy check.

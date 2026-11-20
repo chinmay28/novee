@@ -1,0 +1,22 @@
+{"data":{"receiptsWithCounts":{"receipts":[
+ {"warehouseName":"TESTVILLE","receiptType":"In-Warehouse","documentType":"WarehouseReceiptDetail",
+  "transactionDateTime":"2025-03-14T15:03:00","transactionDate":"2025-03-14","warehouseNumber":470,
+  "registerNumber":11,"transactionNumber":248,"transactionBarcode":"21047001102482503141503",
+  "warehouseAddress1":"1 EXAMPLE EXPY","warehouseCity":"TESTVILLE","warehouseState":"CA","warehousePostalCode":"90000",
+  "subTotal":47.96,"taxes":1.1,"total":49.06,
+  "itemArray":[
+   {"itemNumber":"1370476","itemDescription01":"CMND PICT STRP","itemDescription02":null,"itemIdentifier":"E","unit":1,"amount":15.99,"taxFlag":"Y"},
+   {"itemNumber":"367840","itemDescription01":"/1370476","itemDescription02":null,"unit":-1,"amount":-4.00,"taxFlag":"Y"},
+   {"itemNumber":"818073","itemDescription01":"KS TORTELLON","itemDescription02":"FIVE CHEESE","unit":2,"amount":21.98,"taxFlag":"N"},
+   {"itemNumber":"1068083","itemDescription01":"COCONUT WATER","unit":1,"amount":"13.99","taxFlag":"N"}
+  ],
+  "tenderArray":[{"tenderTypeName":"VISA","tenderDescription":"VISA","amountTender":49.06}]},
+ {"warehouseName":"TESTVILLE","receiptType":"In-Warehouse","transactionDateTime":"2025-04-02T10:15:00","warehouseNumber":470,
+  "transactionBarcode":"21047000900112504021015","subTotal":-13.99,"taxes":0,"total":-13.99,
+  "itemArray":[{"itemNumber":"1068083","itemDescription01":"COCONUT WATER","unit":-1,"amount":-13.99,"taxFlag":"N"}],
+  "tenderArray":[]},
+ {"warehouseName":"TESTVILLE","receiptType":"Gas Station","transactionDateTime":"2025-04-03T08:00:00","warehouseNumber":470,
+  "transactionBarcode":"","registerNumber":51,"transactionNumber":77,"subTotal":40,"taxes":0,"total":40,
+  "itemArray":[{"itemNumber":"800951","itemDescription01":"REGULAR","unit":1,"amount":40.00}]},
+ {"warehouseName":"BROKEN","transactionDateTime":"not a date","total":1}
+]}}}

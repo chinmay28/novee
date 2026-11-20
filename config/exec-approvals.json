@@ -241,6 +241,14 @@
      "argPattern": "^(status|query .*)$"
     },
     {
+     "pattern": "novee-receipts",
+     "argPattern": "^(status|search|show|pdf|sync)( .*)?$"
+    },
+    {
+     "pattern": "/home/chinmay/.local/bin/novee-receipts",
+     "argPattern": "^(status|search|show|pdf|sync)( .*)?$"
+    },
+    {
      "pattern": "openclaw",
      "argPattern": "^(status|health|channels status|skills list|models list|config get|sessions list|--version|logs)( .*)?$"
     }

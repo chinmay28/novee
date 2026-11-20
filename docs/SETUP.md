@@ -94,11 +94,46 @@ The report runs `smartctl`, `tune2fs -l` and `lsusb -v` through `sudo -n`, so th
 
 On the VM: `ssh-keygen -t ed25519 -N "" -f ~/.ssh/disk-health`, make sure the host's key is in `~/.ssh/known_hosts`, and copy `examples/disk-health.example.json` to `~/.config/novee/disk-health.json` with the real address. On the host PC itself `scripts/diskhealth.py` runs without a config and uses the local `~/.local/bin/novee-disk-report`.
 
+## 8. receipts
+
+A Go program, built on the VM. It needs Go 1.23 or newer and a Chrome or Chromium it can start.
+
+```bash
+sudo apt install golang-go xauth          # xauth is for the one-time sign-in window
+# a browser: Google Chrome's .deb is the simplest. Ubuntu's chromium is a snap, which may refuse a
+# profile in a hidden folder; if so set NOVEE_BROWSER_DIR=$HOME/novee-browser for login and sync.
+cd ~/.openclaw/workspace/skills/receipts
+go test ./... && go build -o ~/.local/bin/novee-receipts ./cmd/novee-receipts
+```
+
+Rebuild by hand after a pull that changes the skill; like the exec approvals, a pull never changes what runs. Then apply `config/exec-approvals.json` again (section 7) so Novee may run `novee-receipts status|search|show|pdf|sync`.
+
+Sign in once, by hand, from a desktop on the LAN. The window is the VM's browser shown on your screen; the password goes from your keyboard to the shop and is not stored by Novee.
+
+```bash
+ssh -X VM_ADDRESS novee-receipts login costco     # sign in, tick "keep me signed in", wait for "Signed in."
+ssh VM_ADDRESS novee-receipts sync costco         # first run fetches about three years
+```
+
+Weekly fetch:
+
+```bash
+cp config/systemd/novee-receipts.* ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now novee-receipts.timer
+```
+
+When the shop session expires the timer run reports `SIGN-IN NEEDED`, Novee messages the owner once, and `login` has to be repeated. If the shop serves the unattended (headless) browser a blank page while the window from `login` works, run the sync with a virtual screen instead: `xvfb-run novee-receipts sync costco --headed`, and put the same in the unit's `ExecStart`.
+
+Data: `~/.local/share/novee/receipts/` (one JSON and one PDF per receipt, `state.json`, `exports/`) and `~/.local/share/novee/browser/` (the signed-in profile; treat it like a password). Both are outside the repository. Settings: `NOVEE_RECEIPTS_DIR`, `NOVEE_BROWSER_DIR`, `NOVEE_CHROMIUM` (browser binary), `NOVEE_COSTCO_WAREHOUSE` (home warehouse number, used for the online order list).
+
+Costco has no public API. The connector uses the same order service as the "Orders & Purchases" page, with query shapes taken from public community scripts. If Costco changes it, `sync` says what was rejected; without a browser, a reply saved from the page can be loaded with `novee-receipts import costco FILE`.
+
 ## Tests
 
 ```bash
 python3 skills/repo-sync/tests/test_reposync.py
 python3 skills/vbox-manage/tests/test_novee_vbox.py
+(cd skills/receipts && go test ./...)
 ```
 
-The second file checks the host helper's argument handling, the `--yes` and protected-VM guards and the SSH config entries against a fake VirtualBox. The first runs every sync case (pull, push, merge, conflict, privacy block, failed push) against a throwaway local remote.
+The second file checks the host helper's argument handling, the `--yes` and protected-VM guards and the SSH config entries against a fake VirtualBox. The first runs every sync case (pull, push, merge, conflict, privacy block, failed push) against a throwaway local remote. The Go tests cover the receipt parser, the search and the store, and drive a real browser against a fake shop (sign-in missing, sign-in present, a field the shop rejects, expiry); that last test is skipped when no browser is installed.

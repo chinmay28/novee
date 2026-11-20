@@ -40,3 +40,10 @@ A short log of how Novee was built. Dates are 2026.
 
 - Wrote the `vbox-manage` skill so Novee can do what was done by hand to create it: find and download an ISO, build an unattended Ubuntu install, pick the network, and set up SSH. The host PC exposes one helper over a forced-command SSH key; everything that changes state needs `--yes` and therefore the owner's approval, and the VMs `novee` and `umbrel` are protected from itself.
 - Wrote the `disk-health` skill after a long day of chasing four external drives that kept dropping off a USB hub. The host exposes one read-only report (SMART, ext4 state, mounts, hub chain, port over-current counters, kernel log digest) through a second forced-command key. Lessons baked in: a drive that "cannot spin up" on a hub may be perfectly healthy on a motherboard port; a per-port power-off on a ganged hub does not cut power; and `-n standby` cannot be trusted through a USB bridge that cannot report power mode. Anything that changes a disk stays out of the skill on purpose.
+
+## November 20: receipts
+
+- A hosted assistant had done a job Novee could not: sign in to Costco, save three years of receipts, and answer "did I ever buy this". It drove a browser click by click with a large model, which a 9B model cannot do reliably.
+- Wrote the `receipts` skill the other way round: a program does the browsing and the model only asks it questions. The owner signs in by hand once in a browser profile kept on the VM; the program then asks the shop's own order service for the data from inside that signed-in page, so no password is ever stored or typed by the agent.
+- First skill in Go: small packages with one contract between them (`receipt`, `store`, `search`, `source`, `costco`, `browser`, `render`). A new shop is one more package that implements `source.Source`.
+- The search treats receipt names as what they are, abbreviations: "CMND PICT STRP" answers "command picture strips". It separates lines that match every word from lines that match some, and always states the date range it searched, so "not found" is never mistaken for "never bought".
