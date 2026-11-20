@@ -20,6 +20,8 @@ A real browser that stays open between commands. When a site needs a sign-in, Ch
 novee-browse <command>
 ```
 
+`novee-browse` is a program on the PATH. (`python3 /home/chinmay/.openclaw/workspace/skills/web-browse/scripts/web-browse.py <command>` does the same.)
+
 Use `web_fetch` for a public page you only need to read. Use this skill when the page needs a sign-in, needs clicking, or `web_fetch` came back empty, and for every question about Chinmay's orders, purchases and receipts.
 
 ## The loop
