@@ -128,12 +128,36 @@ Data: `~/.local/share/novee/receipts/` (one JSON and one PDF per receipt, `state
 
 Costco has no public API. The connector uses the same order service as the "Orders & Purchases" page, with query shapes taken from public community scripts. If Costco changes it, `sync` says what was rejected; without a browser, a reply saved from the page can be loaded with `novee-receipts import costco FILE`.
 
+## 9. web-browse
+
+Same toolchain and browser as receipts.
+
+```bash
+cd ~/.openclaw/workspace/skills/web-browse
+go test ./... && go build -o ~/.local/bin/novee-browse ./cmd/novee-browse
+```
+
+Apply `config/exec-approvals.json` again (section 7). It lets Novee run every `novee-browse` command except `login`, and anything with `--yes` asks the owner in Telegram first.
+
+Sign in to a site by hand, from a desktop on the LAN; close the window when done:
+
+```bash
+ssh -X VM_ADDRESS novee-browse login https://www.costco.com/OrderStatusCmd
+```
+
+Each site has its own profile, named after the site (`costco`, `amazon`), under `~/.local/share/novee/browser/`. These are the profiles receipts uses, so signing in with either tool's `login` serves both. A profile can be open in one browser at a time: while a browse session is open on a site, a receipts sync of that site fails to start its browser (run `novee-browse close`, or wait for the 20-minute idle close).
+
+What the guard does and does not do: it stops before clicks and form submissions whose label looks consequential and before typing into password or payment fields, and it refuses addresses on this machine or the home network. It judges by what the page says about an element, so it is a seat belt, not a guarantee; do not sign the browser in to a site where one wrong click would be costly. While a session is open, the browser's control port listens on 127.0.0.1, so any program running as the same user on the VM could drive it.
+
+Settings: `NOVEE_BROWSE_DIR` (session file, screenshots, saved pages; default `~/.local/share/novee/browse`), `NOVEE_BROWSE_IDLE_MINUTES`, `NOVEE_BROWSE_ALLOW_LAN=1`, and `open URL --headed` together with `xvfb-run` if a site serves the headless browser a blank page.
+
 ## Tests
 
 ```bash
 python3 skills/repo-sync/tests/test_reposync.py
 python3 skills/vbox-manage/tests/test_novee_vbox.py
 (cd skills/receipts && go test ./...)
+(cd skills/web-browse && go test ./...)
 ```
 
-The second file checks the host helper's argument handling, the `--yes` and protected-VM guards and the SSH config entries against a fake VirtualBox. The first runs every sync case (pull, push, merge, conflict, privacy block, failed push) against a throwaway local remote. The Go tests cover the receipt parser, the search and the store, and drive a real browser against a fake shop (sign-in missing, sign-in present, a field the shop rejects, expiry); that last test is skipped when no browser is installed.
+The second file checks the host helper's argument handling, the `--yes` and protected-VM guards and the SSH config entries against a fake VirtualBox. The first runs every sync case (pull, push, merge, conflict, privacy block, failed push) against a throwaway local remote. The Go tests cover the receipt parser, the search and the store, and drive a real browser against a fake shop (sign-in missing, sign-in present, a field the shop rejects, expiry); that last test is skipped when no browser is installed. The web-browse tests cover the approval rules and run every command against a fake shop in a real browser, checking that an unapproved "Place order" click reaches nothing.

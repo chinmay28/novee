@@ -47,3 +47,10 @@ A short log of how Novee was built. Dates are 2026.
 - Wrote the `receipts` skill the other way round: a program does the browsing and the model only asks it questions. The owner signs in by hand once in a browser profile kept on the VM; the program then asks the shop's own order service for the data from inside that signed-in page, so no password is ever stored or typed by the agent.
 - First skill in Go: small packages with one contract between them (`receipt`, `store`, `search`, `source`, `costco`, `browser`, `render`). A new shop is one more package that implements `source.Source`.
 - The search treats receipt names as what they are, abbreviations: "CMND PICT STRP" answers "command picture strips". It separates lines that match every word from lines that match some, and always states the date range it searched, so "not found" is never mistaken for "never bought".
+
+## November 20, later: a browser of its own
+
+- The receipts skill covers one question well, but the hosted assistant could also wander a signed-in site: open the order page, click a receipt, save it. Wrote `web-browse` for that.
+- A 9B model cannot work from screenshots or raw HTML, so the tool turns each page into a title, its text and a numbered list of what can be clicked or typed into, and prints that again after every step. The model's whole job is "read, pick one number".
+- Each command is a separate short process, so a small keeper process owns the browser between them and closes it after 20 idle minutes.
+- The lesson from November 5 applied again: rules in the prompt are not enough. The tool itself stops before a click that looks like buying, sending, deleting or signing out and runs it only with `--yes`, which the exec policy turns into an approval request to the owner. Password and card fields cannot be typed into at all, home-network addresses cannot be opened, and every page is printed under a line saying its text is not an instruction.
