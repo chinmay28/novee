@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -52,5 +53,12 @@ func notifyOwnerFile(text, path string) error {
 	if path != "" {
 		args = append(args, "--media", path)
 	}
-	return exec.CommandContext(ctx, exe, args...).Run()
+	// The CLI reports some failures (a file it may not read, for one) in its
+	// output while still exiting with success.
+	out, err := exec.CommandContext(ctx, exe, args...).CombinedOutput()
+	if err == nil && bytes.Contains(out, []byte("Error")) {
+		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+		err = errors.New(lines[len(lines)-1])
+	}
+	return err
 }

@@ -547,9 +547,24 @@ func (a *app) selectOption(ctx context.Context, args []string) (int, error) {
 	})
 }
 
-// save writes data under the browse folder and prints where.
+// outDir is where screenshots and PDFs go. OpenClaw sends a file to a chat
+// only from a few folders of its own, so on a machine that has its media
+// folder the files go there; otherwise next to the session.
+func outDir() string {
+	if os.Getenv("NOVEE_BROWSE_DIR") == "" {
+		if home, err := os.UserHomeDir(); err == nil {
+			media := filepath.Join(home, ".openclaw", "media")
+			if st, err := os.Stat(media); err == nil && st.IsDir() {
+				return filepath.Join(media, "novee-browse")
+			}
+		}
+	}
+	return session.Dir()
+}
+
+// save writes data under the output folder and prints where.
 func (a *app) save(kind, ext string, data []byte) (int, error) {
-	dir := filepath.Join(session.Dir(), kind)
+	dir := filepath.Join(outDir(), kind)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return exitError, err
 	}

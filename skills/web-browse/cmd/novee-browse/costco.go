@@ -346,7 +346,7 @@ func (a *app) costcoReceipt(ctx context.Context, args []string) (int, error) {
 			fmt.Fprintf(a.out, "The PDF was saved but NOT sent. Send it to Chinmay with the message tool.\nFile: %s\n", path)
 			return exitOK, nil
 		}
-		fmt.Fprintf(a.out, "PDF SENT to Chinmay in a separate message (also saved as %s).\nNow tell Chinmay the date, the warehouse and the total from the Verdict line, and that the PDF is in the chat. Run no more commands.\n", path)
+		fmt.Fprintf(a.out, "PDF SENT to Chinmay in a separate message (also saved as %s).\nNow tell Chinmay the date, the warehouse and the total from the Verdict line, and that the PDF is in the chat. Item names on a receipt are abbreviations: if you mention items, copy them exactly as printed and do not guess what they stand for. Run no more commands.\n", path)
 		return exitOK, nil
 	})
 }
