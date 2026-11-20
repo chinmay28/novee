@@ -222,6 +222,52 @@ func Command(profile string, headed bool, extra ...string) (*exec.Cmd, error) {
 	return exec.Command(bin, append(args, extra...)...), nil
 }
 
+// Spawn starts a long-lived helper process (the keeper, the sign-in viewer)
+// that must outlive the command that starts it, with its output in logPath.
+//
+// An agent runtime cleans up everything a command leaves behind, including
+// processes that moved to a session of their own, so where a systemd user
+// manager is running the helper is handed to it as a transient unit. Elsewhere
+// (and with NOVEE_BROWSE_NO_SYSTEMD=1) it is started in a new session.
+func Spawn(name string, args []string, logPath string) error {
+	if run, err := exec.LookPath("systemd-run"); err == nil && os.Getenv("NOVEE_BROWSE_NO_SYSTEMD") != "1" {
+		runtime := os.Getenv("XDG_RUNTIME_DIR")
+		if runtime == "" {
+			runtime = fmt.Sprintf("/run/user/%d", os.Getuid())
+		}
+		if _, err := os.Stat(filepath.Join(runtime, "systemd", "private")); err == nil {
+			a := []string{"--user", "--collect", "--quiet", "--unit", fmt.Sprintf("novee-browse-%s-%d", name, time.Now().UnixNano()),
+				"-p", "StandardOutput=append:" + logPath, "-p", "StandardError=append:" + logPath}
+			for _, kv := range os.Environ() {
+				k, _, _ := strings.Cut(kv, "=")
+				if strings.HasPrefix(k, "NOVEE_") || k == "PATH" || k == "HOME" || k == "DISPLAY" || k == "XAUTHORITY" || k == "WAYLAND_DISPLAY" {
+					a = append(a, "-E", kv)
+				}
+			}
+			cmd := exec.Command(run, append(append(a, "--"), args...)...)
+			cmd.Env = append(os.Environ(), "XDG_RUNTIME_DIR="+runtime)
+			if out, err := cmd.CombinedOutput(); err == nil {
+				return nil
+			} else if len(out) > 0 {
+				_ = os.WriteFile(logPath, out, 0o600) // fall through to the plain way
+			}
+		}
+	}
+	logf, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer logf.Close()
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdout, cmd.Stderr = logf, logf
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go cmd.Wait()
+	return nil
+}
+
 // Start launches a keeper and its browser and waits until the browser answers.
 // keeperArgs is the command line that runs RunKeeper in a new process, without
 // the profile, port and mode arguments, which Start appends.
@@ -239,25 +285,17 @@ func Start(profile, mode string, keeperArgs []string) (*Info, error) {
 	port := l.Addr().(*net.TCPAddr).Port
 	l.Close()
 
-	logf, err := os.OpenFile(filepath.Join(Dir(), "keeper.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
+	logPath := filepath.Join(Dir(), "keeper.log")
+	_ = os.Remove(logPath)
+	if err := Spawn("keeper", append(append([]string{}, keeperArgs...), profile, strconv.Itoa(port), mode), logPath); err != nil {
 		return nil, err
 	}
-	defer logf.Close()
-	args := append(append([]string{}, keeperArgs[1:]...), profile, strconv.Itoa(port), mode)
-	cmd := exec.Command(keeperArgs[0], args...)
-	cmd.Stdout, cmd.Stderr = logf, logf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // survive the command that started it
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	go cmd.Wait()
 	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
 		if in, ok := Current(); ok && in.Port == port {
 			return in, nil
 		}
 	}
-	_ = cmd.Process.Signal(syscall.SIGTERM)
+	_ = Stop()
 	tail, _ := os.ReadFile(filepath.Join(Dir(), "keeper.log"))
 	return nil, fmt.Errorf("the browser did not start (is profile %q open in another browser?): %s", profile, strings.TrimSpace(string(tail)))
 }

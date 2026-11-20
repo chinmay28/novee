@@ -74,6 +74,7 @@ func TestBrowseEndToEnd(t *testing.T) {
 	if os.Getenv("NOVEE_BROWSE_TEST_VIRTUAL") != "1" { // set it to run the test on a virtual screen instead
 		t.Setenv("NOVEE_BROWSE_HEADLESS", "1")
 	}
+	t.Setenv("NOVEE_BROWSE_NO_SYSTEMD", "1")
 	t.Setenv("NOVEE_BROWSER_DIR", t.TempDir())
 
 	out := &bytes.Buffer{}
@@ -169,11 +170,7 @@ func TestBrowseEndToEnd(t *testing.T) {
 	}
 
 	// Passwords are never typed. The owner is sent a link to the browser and signs in himself.
-	_, got = run("open", srv.URL+"/signin")
-	wants(got, "NOTE: this page asks for a password", "Run now: novee-browse login-request")
-	if code, got = run("type", num(got, "Password"), "hunter2"); code != exitError || !strings.Contains(got, "REFUSED: this is a password field") {
-		t.Fatalf("password: %d %s", code, got)
-	}
+	// It happens as soon as a password page is seen, without the model having to ask.
 	sent := filepath.Join(t.TempDir(), "sent")
 	notify := filepath.Join(t.TempDir(), "notify")
 	if err := os.WriteFile(notify, []byte("#!/bin/sh\nprintf '%s' \"$1\" > "+sent+"\n"), 0o700); err != nil {
@@ -182,11 +179,16 @@ func TestBrowseEndToEnd(t *testing.T) {
 	t.Setenv("NOVEE_BROWSE_NOTIFY_CMD", notify)
 	t.Setenv("NOVEE_BROWSE_VIEW_HOST", "127.0.0.1")
 	t.Setenv("NOVEE_BROWSE_VIEW_PORT", "0")
-	code, got = run("login-request")
+	code, got = run("open", srv.URL+"/signin")
 	if code != exitOK {
-		t.Fatalf("login-request: %d %s", code, got)
+		t.Fatalf("open a sign-in page: %d %s", code, got)
 	}
-	wants(got, "SIGN-IN LINK SENT to Chinmay", "novee-browse snapshot")
+	wants(got, "NOTE: this page asks for a password", "SIGN-IN LINK SENT to Chinmay", "novee-browse snapshot")
+	signin := got
+	if code, got = run("type", num(got, "Password"), "hunter2"); code != exitError || !strings.Contains(got, "REFUSED: this is a password field") {
+		t.Fatalf("password: %d %s", code, got)
+	}
+	got = signin
 	msg, _ := os.ReadFile(sent)
 	link := regexp.MustCompile(`http://127\.0\.0\.1:\d+/\?t=[0-9a-f]{32}`).FindString(string(msg))
 	if link == "" {

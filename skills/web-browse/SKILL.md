@@ -55,7 +55,7 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 - `type N TEXT`: replace the content of text field N. Add `--enter` to press Enter (for search boxes).
 - `select N TEXT`: choose an option in drop-down list N.
 - `screenshot`, `pdf`: save what is shown; the output has `File: PATH`. Send that file with the `message` tool.
-- `login-request`: the page asks for a password. Sends Chinmay a link to this browser so he signs in himself. No arguments.
+- `login-request`: send Chinmay a new link to this browser so he signs in himself. No arguments. The first link is sent automatically when a page asks for a password.
 - `status`, `close`: is a browser open; close it when the task is finished.
 
 ## Rules
@@ -64,8 +64,10 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 - `APPROVAL NEEDED`: the command did nothing. Tell Chinmay exactly what the click would do (the button name and the page) and ask. Only after he says yes, run the same command once with `--yes`; OpenClaw then asks him to approve in Telegram. If approval is pending or denied, stop.
 - Never buy, order, pay, cancel, delete, send or change account settings unless Chinmay asked for exactly that in this conversation.
 - `REFUSED`: do not try another way. Passwords and card numbers are never typed.
-- `NOTE: this page asks for a password`: the site is not signed in. Run `novee-browse login-request` once. The tool messages Chinmay a sign-in link itself; you do not see the link and must not ask for it. Reply: "I sent you a sign-in link for SITE. Open it, sign in, tap Done, then tell me." Then stop and wait. When he says he is done, run `novee-browse snapshot` and continue the task he asked for. If the page still asks for a password, say so and offer to send a new link. Never ask for the password or a verification code.
+- `NOTE: this page asks for a password` followed by `SIGN-IN LINK SENT`: the site is not signed in, and the tool has already messaged Chinmay a link to sign in himself. You do not see the link and must not ask for it. Reply: "I sent you a sign-in link for SITE. Open it, sign in, tap Done, then tell me." Then stop and wait. When he says he is done, run `novee-browse snapshot` and continue the task he asked for. Never ask for the password or a verification code.
 - `SIGN-IN LINK ALREADY SENT`: do not send another; remind him of the one he has.
+- `No new sign-in link was sent`: too many were sent already. Tell Chinmay and ask; only if he wants one, run `novee-browse login-request`.
+- Say that a link was sent only when the output says `SIGN-IN LINK SENT`.
 - A blank page, or the same page again after a click: run `snapshot` once. If it is still stuck, say what you see; do not click the same thing more than twice.
 - `ERROR`: quote it. Do not retry unchanged.
 - When the task is done, run `close`.
@@ -75,7 +77,7 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 Chinmay: "Give me the last Costco receipt from 2025."
 
 1. `novee-browse open https://www.costco.com/OrderStatusCmd`
-2. If the output ends with `NOTE: this page asks for a password`: `novee-browse login-request`, tell Chinmay you sent him a sign-in link, stop. When he says done: `novee-browse snapshot`.
+2. If the output says `SIGN-IN LINK SENT`: tell Chinmay you sent him a sign-in link, stop. When he says done: `novee-browse snapshot`.
 3. The orders page has tabs; warehouse receipts are under the one named like `Warehouse` or `In-Warehouse`. Click it.
 4. Pick the period: if there is a drop-down or button for the year or date range, choose 2025 (`select N 2025` or `click N`). The list is newest first, so the first receipt shown for 2025 is the last one of 2025.
 5. Click its `View Receipt` (use `find receipt` if it is not listed).

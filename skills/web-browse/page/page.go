@@ -96,13 +96,15 @@ func (p *Page) Reload(ctx context.Context) error {
 }
 
 // WaitContent gives a page that draws itself with scripts (most sign-in
-// pages) up to limit to show something that can be read or clicked.
-func (p *Page) WaitContent(ctx context.Context, limit time.Duration) {
+// pages) up to limit to show something that can be clicked, and reports
+// whether it did.
+func (p *Page) WaitContent(ctx context.Context, limit time.Duration) bool {
 	for deadline := time.Now().Add(limit); time.Now().Before(deadline) && ctx.Err() == nil; time.Sleep(time.Second) {
 		if s, err := p.Snapshot(ctx); err == nil && len(s.Elements) > 0 {
-			return
+			return true
 		}
 	}
+	return false
 }
 
 // Back goes to the previous page.

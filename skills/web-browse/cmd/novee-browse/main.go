@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -47,8 +46,9 @@ Session:
   status                is a browser open, and where
   close                 close the browser (it also closes itself when idle)
 Sign-in (Novee never types a password):
-  login-request         the page asks for a password: send Chinmay a link to this
-                        browser so he signs in himself, from his phone or PC
+  login-request         send Chinmay a link to this browser so he signs in himself,
+                        from his phone or PC. Done automatically when a page asks
+                        for a password; use it to send a new link
 Owner only (opens a browser window):
   login URL             sign in to a site by hand; later commands are signed in
 
@@ -211,7 +211,11 @@ func (a *app) show(ctx context.Context, p *page.Page) (int, error) {
 		fmt.Fprintf(a.out, "(%d more elsewhere on the page: `scroll down`, or `find WORDS` to search the whole page)\n", hidden)
 	}
 	if password {
-		fmt.Fprintln(a.out, "NOTE: this page asks for a password, so the site is not signed in. Never type it. Run now: novee-browse login-request\nThat sends Chinmay a link to sign in himself.")
+		// A small model tends to say it asked for the sign-in without doing it, so the tool does it.
+		fmt.Fprintln(a.out, "NOTE: this page asks for a password, so the site is not signed in. Never type it.")
+		if err := a.requestSignIn(session.SiteProfile(s.URL), true); err != nil {
+			fmt.Fprintln(a.out, "ERROR:", err)
+		}
 	}
 	return exitOK, nil
 }
@@ -250,7 +254,10 @@ func (a *app) open(ctx context.Context, args []string) (int, error) {
 		if err := p.Goto(ctx, url); err != nil {
 			return exitError, fmt.Errorf("%s did not load: %w", url, err)
 		}
-		p.WaitContent(ctx, 12*time.Second)
+		// Now and then a page comes up empty (Costco's sign-in does); a second load fixes it.
+		if !p.WaitContent(ctx, 12*time.Second) && p.Reload(ctx) == nil {
+			p.WaitContent(ctx, 12*time.Second)
+		}
 		return a.show(ctx, p)
 	})
 }
@@ -601,42 +608,66 @@ func (a *app) loginRequest(ctx context.Context, args []string) (int, error) {
 	}); err != nil {
 		return code, err
 	}
+	return exitOK, a.requestSignIn(site, false)
+}
+
+const maxAutoRequests = 3 // sign-in links sent without being asked, per hour
+
+// recentRequests counts the sign-in links sent in the last hour, adding one if add is set.
+func recentRequests(add bool) int {
+	path := filepath.Join(session.Dir(), "signin-requests")
+	data, _ := os.ReadFile(path)
+	var keep []string
+	for _, line := range strings.Fields(string(data)) {
+		if ts, err := strconv.ParseInt(line, 10, 64); err == nil && time.Since(time.Unix(ts, 0)) < time.Hour {
+			keep = append(keep, line)
+		}
+	}
+	if add {
+		keep = append(keep, strconv.FormatInt(time.Now().Unix(), 10))
+		_ = os.WriteFile(path, []byte(strings.Join(keep, "\n")+"\n"), 0o600)
+	}
+	return len(keep)
+}
+
+// requestSignIn starts the sign-in viewer and sends the owner its link. auto
+// means nobody asked for it: the tool saw a password page.
+func (a *app) requestSignIn(site string, auto bool) error {
 	const after = "Now reply to Chinmay: \"I sent you a sign-in link for %s. Open it, sign in, tap Done, then tell me.\" Then stop and wait. When he says he is done, run: novee-browse snapshot\n"
 	if in, ok := viewer.Current(); ok {
-		fmt.Fprintf(a.out, "SIGN-IN LINK ALREADY SENT %d minutes ago and still valid. Do not send another.\n"+after,
+		fmt.Fprintf(a.out, "SIGN-IN LINK ALREADY SENT to Chinmay %d minutes ago and still valid. Do not send another.\n"+after,
 			int(time.Since(in.Started).Minutes()), site)
-		return exitOK, nil
+		return nil
 	}
-	logf, err := os.OpenFile(filepath.Join(session.Dir(), "viewer.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		return exitError, err
+	if auto && recentRequests(false) >= maxAutoRequests {
+		fmt.Fprintf(a.out, "No new sign-in link was sent: %d were sent in the last hour. Tell Chinmay the site is still not signed in and ask if he wants another link; if yes, run: novee-browse login-request\n", maxAutoRequests)
+		return nil
 	}
-	defer logf.Close()
-	cmd := exec.Command(a.viewer[0], append(append([]string{}, a.viewer[1:]...), site)...)
-	cmd.Stdout, cmd.Stderr = logf, logf
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // survive this command
-	if err := cmd.Start(); err != nil {
-		return exitError, err
+	started := time.Now()
+	logPath := filepath.Join(session.Dir(), "viewer.log")
+	_ = os.Remove(logPath)
+	if err := session.Spawn("viewer", append(append([]string{}, a.viewer...), site), logPath); err != nil {
+		return err
 	}
-	go cmd.Wait()
 	var in *viewer.Info
 	for deadline := time.Now().Add(10 * time.Second); in == nil && time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
-		if v, ok := viewer.Current(); ok && v.Pid == cmd.Process.Pid {
+		if v, ok := viewer.Current(); ok && !v.Started.Before(started) {
 			in = v
 		}
 	}
 	if in == nil {
-		tail, _ := os.ReadFile(filepath.Join(session.Dir(), "viewer.log"))
-		return exitError, fmt.Errorf("the sign-in page did not start: %s", strings.TrimSpace(string(tail)))
+		tail, _ := os.ReadFile(logPath)
+		return fmt.Errorf("the sign-in page did not start: %s", strings.TrimSpace(string(tail)))
 	}
+	recentRequests(true)
 	text := fmt.Sprintf("Novee needs you to sign in to %s.\nOpen this on your home network: %s\nSign in there (tick \"keep me signed in\"), tap Done, then tell Novee. The link works for %d minutes.",
 		site, in.Link(), int(viewerLimit.Minutes()))
 	if err := notifyOwner(text); err != nil {
 		// No way to message the owner from here: the model has to pass the link on.
 		fmt.Fprintf(a.out, "SIGN-IN LINK (send this to Chinmay exactly as written, on its own line):\n%s\n", in.Link())
 		fmt.Fprintf(a.out, "Tell him: open it, sign in to %s, tap Done, then tell you. Then stop and wait. When he says he is done, run: novee-browse snapshot\n", site)
-		return exitOK, nil
+		return nil
 	}
 	fmt.Fprintf(a.out, "SIGN-IN LINK SENT to Chinmay in a separate message (valid %d minutes).\n"+after, int(viewerLimit.Minutes()), site)
-	return exitOK, nil
+	return nil
 }
