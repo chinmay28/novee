@@ -71,6 +71,8 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 - `the sign-in page of this site stays empty`: the site is refusing the browser for now. Tell Chinmay that and stop.
 - `No new sign-in link was sent`: too many were sent already. Tell Chinmay and ask; only if he wants one, run `novee-browse login-request`.
 - Say that a link was sent only when the output says `SIGN-IN LINK SENT`.
+- `A pop-up is open on top of the page`: the output shows only the pop-up (a receipt, a notice). Read it, `pdf` it if Chinmay wants it, and click its `Close` button to return to the page.
+- Buttons with the same name carry `(for: ...)` with the entry they belong to. Choose by that text, never by position.
 - A blank page, or the same page again after a click: run `snapshot` once. If it is still stuck, say what you see; do not click the same thing more than twice.
 - `ERROR`: quote it. Do not retry unchanged.
 - When the task is done, run `close`.
@@ -81,15 +83,17 @@ Chinmay: "Give me the last Costco receipt from 2025."
 
 1. `novee-browse open https://www.costco.com/OrderStatusCmd`
 2. If the output says `SIGN-IN LINK SENT`: tell Chinmay you sent him a sign-in link, stop. When he says done: `novee-browse snapshot`.
-3. The orders page has tabs; warehouse receipts are under the one named like `Warehouse` or `In-Warehouse`. Click it.
-4. Pick the period: if there is a drop-down or button for the year or date range, choose 2025 (`select N 2025` or `click N`). The list is newest first, so the first receipt shown for 2025 is the last one of 2025.
-5. Click its `View Receipt` (use `find receipt` if it is not listed).
-6. `novee-browse pdf`, send the file after `File:` with the `message` tool, and say the date and total shown on the page. Then `novee-browse close`.
+3. The orders page has the buttons `Online` and `Warehouse`. Shop receipts are under `Warehouse`: click it.
+4. Pick the period with the drop-down `select "Showing"`. It starts at `Last 3 Months`; the other options are three-month periods named by the year they END in: `2026 December - February` is December 2025 to February 2026. So the last receipts of 2025 are in `2026 December - February`: `novee-browse select N 2026 December - February`.
+5. The list is newest first, one `View Receipt` button per receipt, each marked with its date and total: `button "View Receipt" (for: In-Warehouse 12/27/2025 - 03:16pm ALMADEN Total $117.25)`. Go down the list to the FIRST button whose date ends in 2025; that is the last receipt of 2025. Click it. (If no date in that period ends in 2025, select `2025 September - November` and take the first button.)
+6. A pop-up opens with the receipt text. `novee-browse pdf` saves the pop-up alone; send the file after `File:` with the `message` tool, and tell Chinmay the date, the warehouse and the total from the receipt. Then `novee-browse close`.
+
+Other years work the same way: the newest receipt of year Y is in the period `Y+1 December - February` if it has a date in December of Y, otherwise in `Y September - November`. `Online` orders have `View Order Details` links instead of receipts.
 
 Chinmay: "Open my Costco orders and tell me what my last warehouse trip cost."
 
-1. `novee-browse open https://www.costco.com/OrderStatusCmd` -> page lists tabs, one is `[7] link "Warehouse"`.
-2. `novee-browse click 7` -> text shows the receipts list; the first line has a date and a total.
+1. `novee-browse open https://www.costco.com/OrderStatusCmd` -> the page has `[45] button "Warehouse"`.
+2. `novee-browse click 45` -> text shows the receipts list, newest first; the first entry has a date and a total.
 3. Answer with that date and total, then `novee-browse close`.
 
 ## Setup (see docs/SETUP.md)

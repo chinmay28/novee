@@ -45,7 +45,11 @@ func site(ordered, noted *atomic.Int32) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, shop) })
 	mux.HandleFunc("/orders", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<title>Orders</title><main><h1>Your orders</h1><p>03/14/2025 CMND PICT STRP $15.99</p></main>`)
+		fmt.Fprint(w, `<title>Orders</title><main><h1>Your orders</h1><p>03/14/2025 CMND PICT STRP $15.99</p>
+<div class="card"><b>12/27/2025</b> Total $117.25 <button onclick="document.getElementById('r').hidden = false">View Receipt</button></div>
+<div class="card"><b>12/21/2025</b> Total $77.92 <button>View Receipt</button></div>
+<div id="r" role="dialog" aria-modal="true" hidden style="position:fixed;top:10px;left:10px;width:300px;height:200px;background:#fff">
+<h2>Receipt</h2><p>CHERRIES 9.99</p><p>TOTAL 117.25</p><button onclick="this.parentElement.hidden = true">Close</button></div></main>`)
 	})
 	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `<title>Search</title><main>Results for %s</main>`, r.URL.Query().Get("q"))
@@ -132,6 +136,16 @@ func TestBrowseEndToEnd(t *testing.T) {
 	// Reading and following links is free.
 	_, got := run("click", num(home, "Orders & Purchases"))
 	wants(got, `Clicked link "Orders & Purchases".`, "Page: Orders", "03/14/2025 CMND PICT STRP $15.99")
+	// Buttons with the same name say which entry they belong to, and a pop-up is read on its own.
+	wants(got, `button "View Receipt" (for: 12/27/2025 Total $117.25)`, `button "View Receipt" (for: 12/21/2025 Total $77.92)`)
+	receipt := regexp.MustCompile(`\[(\d+)\] button "View Receipt" \(for: 12/27/2025`).FindStringSubmatch(got)
+	_, got = run("click", receipt[1])
+	wants(got, "A pop-up is open", "CHERRIES 9.99", `button "Close"`)
+	if strings.Contains(got, "CMND PICT STRP") || strings.Contains(got, `"View Receipt" (for`) {
+		t.Errorf("with a pop-up open, only the pop-up is shown:\n%s", got)
+	}
+	_, got = run("click", num(got, "Close"))
+	wants(got, "CMND PICT STRP")
 	_, got = run("find", "cmnd", "strp")
 	wants(got, "- 03/14/2025 CMND PICT STRP $15.99")
 	_, got = run("find", "umbrella")

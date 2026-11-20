@@ -20,6 +20,9 @@ type Element struct {
 	// InView is true when the element is on or just below the visible screen.
 	InView  bool     `json:"inView"`
 	Options []string `json:"options"`
+	// Context tells apart elements with the same name ("View Receipt" ten
+	// times): the text of the list entry or card the element sits in.
+	Context string `json:"context"`
 	// Facts the guard needs.
 	Password bool `json:"password"` // a password field
 	Payment  bool `json:"payment"`  // a card, bank or identity number field
@@ -43,6 +46,9 @@ func (e Element) String() string {
 	if e.Host != "" {
 		s += " (goes to " + e.Host + ")"
 	}
+	if e.Context != "" {
+		s += " (for: " + e.Context + ")"
+	}
 	return s
 }
 
@@ -52,6 +58,7 @@ type Snapshot struct {
 	URL      string    `json:"url"`
 	Text     string    `json:"text"` // the readable text of the whole page
 	Elements []Element `json:"elements"`
+	Dialog   bool      `json:"dialog"` // a pop-up is open; Text and Elements are the pop-up's
 	ScrollY  int       `json:"scrollY"`
 	Height   int       `json:"height"` // full page height in pixels
 	ViewH    int       `json:"viewH"`
@@ -61,6 +68,14 @@ type Snapshot struct {
 // element into an Element.
 const describe = `
 const __clean = s => (s || '').replace(/\s+/g, ' ').trim();
+// The pop-up that is open on top of the page, if any.
+const __dialog = () => {
+  const ds = Array.from(document.querySelectorAll('dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true]')).filter(d => {
+    const r = d.getBoundingClientRect(), cs = getComputedStyle(d);
+    return r.width > 50 && r.height > 50 && cs.visibility !== 'hidden' && cs.display !== 'none' && !d.closest('[aria-hidden=true]');
+  });
+  return ds.length ? ds[ds.length - 1] : null;
+};
 const __nv = (el, ref) => {
   const tag = el.tagName.toLowerCase(), role = el.getAttribute('role') || '';
   const type = (el.getAttribute('type') || '').toLowerCase();
@@ -102,19 +117,34 @@ const snapshotJS = `(() => {` + describe + `
   const sel = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=tab],' +
     '[role=menuitem],[role=checkbox],[role=radio],[role=option],[role=combobox],[role=searchbox],[onclick],[contenteditable=true]';
   document.querySelectorAll('[data-novee-ref]').forEach(e => e.removeAttribute('data-novee-ref'));
-  const out = []; let n = 0;
-  for (const el of document.querySelectorAll(sel)) {
+  const dlg = __dialog();
+  const out = [], nodes = []; let n = 0;
+  for (const el of (dlg || document).querySelectorAll(sel)) {
     const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
     if (r.width < 1 || r.height < 1 || cs.visibility === 'hidden' || cs.display === 'none' || el.disabled ||
         el.closest('[aria-hidden=true]')) continue;
     const d = __nv(el, ++n);
     if (!d.name && d.kind === 'link') { n--; continue; }
     el.setAttribute('data-novee-ref', n);
-    out.push(d);
+    out.push(d); nodes.push(el);
   }
-  const root = document.querySelector('main') || document.body;
+  const root = dlg || document.querySelector('main') || document.body;
+  // Elements that share a name get the text of the smallest block that holds only one of them.
+  const groups = {};
+  out.forEach((d, i) => { if (d.name) (groups[d.kind + '|' + d.name] = groups[d.kind + '|' + d.name] || []).push(i); });
+  for (const idx of Object.values(groups)) {
+    if (idx.length < 2) continue;
+    for (const i of idx) {
+      let box = nodes[i];
+      while (box.parentElement && box.parentElement !== root && box.parentElement !== document.body &&
+             idx.filter(j => box.parentElement.contains(nodes[j])).length === 1) box = box.parentElement;
+      if (box === nodes[i]) continue;
+      const ctx = __clean((box.innerText || '').split(out[i].name).join(' '));
+      if (ctx) out[i].context = ctx.slice(0, 90);
+    }
+  }
   const text = (root ? root.innerText : '').split('\n').map(__clean).filter(x => x).join('\n');
-  return {title: document.title, url: location.href, text: text, elements: out,
+  return {title: document.title, url: location.href, text: text, elements: out, dialog: !!dlg,
     scrollY: Math.round(scrollY), height: document.documentElement.scrollHeight, viewH: innerHeight};
 })()`
 

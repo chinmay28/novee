@@ -246,8 +246,39 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 	return png, p.run(ctx, chromedp.CaptureScreenshot(&png))
 }
 
-// PDF prints the page as the site lays it out for printing.
+// printOnlyDialog makes the open pop-up, if any, the only thing that prints,
+// at its full length. It returns whether there was one.
+const printOnlyDialog = `(() => {` + describe + `
+  const d = __dialog(); if (!d) return false;
+  d.setAttribute('data-novee-print', '');
+  for (let a = d.parentElement; a && a !== document.documentElement; a = a.parentElement) a.setAttribute('data-novee-print-up', '');
+  const st = document.createElement('style'); st.id = 'novee-print';
+  st.textContent = '@media print {' +
+    'body * { visibility: hidden !important; }' +
+    '[data-novee-print], [data-novee-print] * { visibility: visible !important; max-height: none !important; overflow: visible !important; }' +
+    '[data-novee-print-up] { position: static !important; transform: none !important; overflow: visible !important; max-height: none !important; height: auto !important; }' +
+    '[data-novee-print] { position: absolute !important; left: 0 !important; top: 0 !important; margin: 0 !important; height: auto !important; transform: none !important; box-shadow: none !important; }' +
+    '}';
+  document.head.appendChild(st);
+  return true;
+})()`
+
+const printEverything = `(() => {
+  const st = document.getElementById('novee-print'); if (st) st.remove();
+  document.querySelectorAll('[data-novee-print]').forEach(e => e.removeAttribute('data-novee-print'));
+  document.querySelectorAll('[data-novee-print-up]').forEach(e => e.removeAttribute('data-novee-print-up'));
+})()`
+
+// PDF prints the page as the site lays it out for printing. When a pop-up is
+// open (a receipt, an invoice), it prints the pop-up alone.
 func (p *Page) PDF(ctx context.Context) ([]byte, error) {
+	var only bool
+	if err := p.eval(ctx, printOnlyDialog, &only); err != nil {
+		return nil, err
+	}
+	if only {
+		defer p.eval(context.WithoutCancel(ctx), printEverything, nil)
+	}
 	var pdf []byte
 	err := p.run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		var err error
