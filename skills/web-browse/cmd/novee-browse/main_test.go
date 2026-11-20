@@ -53,6 +53,13 @@ func site(ordered, noted *atomic.Int32) http.Handler {
 	mux.HandleFunc("/signin", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<title>Sign In</title><form><input name="email" aria-label="Email" autofocus><input type="password" aria-label="Password"><button>Sign In</button></form>`)
 	})
+	// A sign-in page that draws nothing for a profile that has been here before, as
+	// Costco's does: the first visit leaves a mark in the browser's storage.
+	mux.HandleFunc("/login/stale", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<title>Sign In</title><div id="f"></div><script>
+if (!localStorage.getItem('seen')) document.getElementById('f').innerHTML = '<a href="/">Help</a>';
+if (location.hash !== '#again') localStorage.setItem('seen', '1');</script>`)
+	})
 	mux.HandleFunc("/ordered", func(w http.ResponseWriter, r *http.Request) { ordered.Add(1) })
 	mux.HandleFunc("/note", func(w http.ResponseWriter, r *http.Request) {
 		noted.Add(1)
@@ -169,6 +176,14 @@ func TestBrowseEndToEnd(t *testing.T) {
 		t.Fatalf("stale number: %d %s", code, got)
 	}
 
+	// A sign-in page that comes up empty for a used profile gets a fresh profile.
+	if code, got = run("open", srv.URL+"/login/stale"); code != exitOK || !strings.Contains(got, `link "Help"`) {
+		t.Fatalf("first visit to the sign-in page: %d %s", code, got)
+	}
+	if code, got = run("open", srv.URL+"/login/stale#again"); code != exitOK || !strings.Contains(got, `link "Help"`) {
+		t.Fatalf("an empty sign-in page must be retried with a fresh profile: %d %s", code, got)
+	}
+
 	// Passwords are never typed. The owner is sent a link to the browser and signs in himself.
 	// It happens as soon as a password page is seen, without the model having to ask.
 	sent := filepath.Join(t.TempDir(), "sent")
@@ -235,6 +250,10 @@ func TestBrowseEndToEnd(t *testing.T) {
 	}
 	_, got = run("snapshot")
 	wants(got, `value="me@example.com"`)
+	// While the link is live the page is not loaded again under the owner's fingers.
+	if code, got = run("open", srv.URL+"/signin"); code != exitOK || !strings.Contains(got, "NOT loaded again") || !strings.Contains(got, `value="me@example.com"`) {
+		t.Errorf("open during a sign-in must leave the page alone: %d %s", code, got)
+	}
 	if code, got = run("login-request"); code != exitOK || !strings.Contains(got, "ALREADY SENT") {
 		t.Errorf("a second request must not send a second link: %d %s", code, got)
 	}

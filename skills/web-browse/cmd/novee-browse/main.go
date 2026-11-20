@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -240,27 +241,76 @@ func (a *app) open(ctx context.Context, args []string) (int, error) {
 		return code, nil
 	}
 	want, mode := session.SiteProfile(url), session.Mode(*headed)
-	if in, ok := session.Current(); !ok || in.Profile != want || in.Mode != mode {
+	in, live := session.Current()
+	if v, ok := viewer.Current(); ok && live && in.Profile == want {
+		// The owner may be typing his password on this very page: leave it alone.
+		fmt.Fprintf(a.out, "Chinmay was sent a sign-in link for %s %d minutes ago and may be signing in right now, so the page was NOT loaded again. This is what it shows:\n",
+			want, int(time.Since(v.Started).Minutes()))
+		return a.withPage(func(p *page.Page) (int, error) { return a.show(ctx, p) })
+	}
+	start := func() error {
 		// Each site has its own profile, so signing in to one never exposes another.
 		viewer.Stop()
 		if err := session.Stop(); err != nil {
-			return exitError, err
+			return err
 		}
-		if _, err := session.Start(want, mode, a.keeper); err != nil {
+		_, err := session.Start(want, mode, a.keeper)
+		return err
+	}
+	if !live || in.Profile != want || in.Mode != mode {
+		if err := start(); err != nil {
 			return exitError, err
 		}
 	}
-	return a.withPage(func(p *page.Page) (int, error) {
-		if err := p.Goto(ctx, url); err != nil {
-			return exitError, fmt.Errorf("%s did not load: %w", url, err)
+	load := func() (empty bool, at string, err error) {
+		_, err = a.withPage(func(p *page.Page) (int, error) {
+			if err := p.Goto(ctx, url); err != nil {
+				return exitError, fmt.Errorf("%s did not load: %w", url, err)
+			}
+			empty = !p.WaitContent(ctx, 12*time.Second)
+			_, at, _, _ = p.Where(ctx)
+			return exitOK, nil
+		})
+		return empty, at, err
+	}
+	empty, at, err := load()
+	if err != nil {
+		return exitError, err
+	}
+	switch {
+	case empty && signInAddress.MatchString(at):
+		// A sign-in page that draws nothing: the shop's bot protection has taken against what this
+		// profile stored (seen with Costco after repeated visits without signing in). The profile
+		// is not signed in, or it would not be on this page, so nothing is lost by starting it afresh.
+		if err := session.Stop(); err != nil {
+			return exitError, err
 		}
-		// Now and then a page comes up empty (Costco's sign-in does); a second load fixes it.
-		if !p.WaitContent(ctx, 12*time.Second) && p.Reload(ctx) == nil {
-			p.WaitContent(ctx, 12*time.Second)
+		if err := os.RemoveAll(session.ProfileDir(want)); err != nil {
+			return exitError, err
 		}
-		return a.show(ctx, p)
-	})
+		if err := start(); err != nil {
+			return exitError, err
+		}
+		if empty, _, err = load(); err != nil {
+			return exitError, err
+		}
+		if empty {
+			fmt.Fprintln(a.out, "ERROR: the sign-in page of this site stays empty, even with a fresh browser profile. The site may be refusing this browser for now. Tell Chinmay exactly that and stop; do not try again for an hour.")
+			return exitError, nil
+		}
+	case empty: // now and then a page just needs a second load
+		_, _ = a.withPage(func(p *page.Page) (int, error) {
+			if p.Reload(ctx) == nil {
+				p.WaitContent(ctx, 12*time.Second)
+			}
+			return exitOK, nil
+		})
+	}
+	return a.withPage(func(p *page.Page) (int, error) { return a.show(ctx, p) })
 }
+
+// signInAddress matches the address of a page whose only purpose is signing in.
+var signInAddress = regexp.MustCompile(`(?i)(sign-?in|log-?in|logon|oauth2?|authorize|sso)`)
 
 func (a *app) snapshot(ctx context.Context, _ []string) (int, error) {
 	return a.withPage(func(p *page.Page) (int, error) { return a.show(ctx, p) })

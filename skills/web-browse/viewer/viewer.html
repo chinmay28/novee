@@ -69,7 +69,8 @@ async function refresh() {
       const old = screen_.src;
       screen_.src = URL.createObjectURL(await r.blob());
       if (old) URL.revokeObjectURL(old);
-      where.textContent = unquote(r.headers.get('X-Page-Title')) + ' · ' + unquote(r.headers.get('X-Page-Url')).split('?')[0];
+      let host = ''; try { host = new URL(unquote(r.headers.get('X-Page-Url'))).host; } catch (e) {}
+      where.textContent = 'Showing: ' + unquote(r.headers.get('X-Page-Title')) + ' (' + host + ')';
     }
   } catch (e) { msg.textContent = 'Could not reach Novee. Are you on the home network?'; }
   setTimeout(refresh, 600);

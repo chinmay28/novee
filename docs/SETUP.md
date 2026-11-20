@@ -145,6 +145,8 @@ The browser needs a screen to draw on, even though nobody looks at it: Costco's 
 
 Signing in: when a page asks for a password, the tool itself (not the model, which tends to say it did without doing it) starts a sign-in request; `novee-browse login-request` sends a fresh one, and at most three are sent unasked per hour. It starts a small web page on the VM (port 7717, or a free one) that shows the browser and passes on taps and typing, and messages the owner the link with `openclaw message send`. The browser and this page are started as transient systemd user units, because OpenClaw removes every process a command leaves behind. The owner opens it on a phone or PC on the home network, signs in, ticks "keep me signed in" and taps Done. The link carries a random token and dies on Done, when the browser closes, or after 15 minutes. What is typed there goes into the browser and is not logged or shown to the model. It travels over plain HTTP inside the home network, so use it on a network you trust; from elsewhere, reach the VM through a VPN and set `NOVEE_BROWSE_VIEW_HOST` to the name or address the link should use.
 
+Two things protect the sign-in. While a link is live, `open` on that site shows the page as it is instead of loading it again, so the model cannot pull the page away while the owner types. And when a sign-in page comes up empty, `open` deletes that site's browser profile and tries once with a fresh one: Costco's bot protection serves a page that draws nothing to a profile that has visited the sign-in page repeatedly without signing in, and a profile sitting on a sign-in page has no sign-in to lose.
+
 The old way still works from a desktop on the LAN (needs `xauth`); close the window when done:
 
 ```bash
