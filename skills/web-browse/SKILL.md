@@ -54,8 +54,8 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 - `find WORDS`: where these words are on the page, with element numbers.
 - `scroll down|up|top|bottom`, `back`.
 - `click N`: click element N.
-- `type N TEXT`: replace the content of text field N. Add `--enter` to press Enter (for search boxes).
-- `select N TEXT`: choose an option in drop-down list N.
+- `type N TEXT`: replace the content of text field N, for example `type 11 batteries --enter`. `--enter` presses Enter (for search boxes).
+- `select N TEXT`: choose an option in drop-down list N, for example `select 48 Last 3 Months`.
 - `screenshot`, `pdf`: save what is shown; the output has `File: PATH`. Send that file with the `message` tool.
 - `login-request`: send Chinmay a new link to this browser so he signs in himself. No arguments. The first link is sent automatically when a page asks for a password.
 - `status`, `close`: is a browser open; close it when the task is finished.
@@ -77,18 +77,23 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 - `ERROR`: quote it. Do not retry unchanged.
 - When the task is done, run `close`.
 
+## Costco receipts: one command
+
+Do not click through Costco's receipt pages yourself. These commands do it:
+
+- `novee-browse costco-receipt last 2025`: the newest warehouse receipt of that year. Without a year: of this year.
+- `novee-browse costco-receipt 12/27/2025`: the receipt of that day.
+- `novee-browse costco-receipts 2025`: every warehouse receipt of the year, with date, warehouse and total.
+
+`costco-receipt` prints the receipt text and sends Chinmay the PDF itself. How to answer:
+
+- `Verdict: FOUND` and `PDF SENT`: tell Chinmay the date, warehouse and total from the Verdict line and that the PDF is in the chat. Run nothing more.
+- `NOT sent` with `File:`: send that file with the `message` tool.
+- `Verdict: NOT FOUND`: say so, and offer the list (`costco-receipts YEAR`).
+- `SIGN-IN LINK SENT`: Costco is not signed in; see the rule below. When Chinmay says he is done, run the same costco command again.
+- For "did I buy X" or "how much was X", get the receipts with these commands and read the item lines; receipt names are abbreviated (KS = Kirkland Signature).
+
 ## Examples
-
-Chinmay: "Give me the last Costco receipt from 2025."
-
-1. `novee-browse open https://www.costco.com/OrderStatusCmd`
-2. If the output says `SIGN-IN LINK SENT`: tell Chinmay you sent him a sign-in link, stop. When he says done: `novee-browse snapshot`.
-3. The orders page has the buttons `Online` and `Warehouse`. Shop receipts are under `Warehouse`: click it.
-4. Pick the period with the drop-down `select "Showing"`. It starts at `Last 3 Months`; the other options are three-month periods named by the year they END in: `2026 December - February` is December 2025 to February 2026. So the last receipts of 2025 are in `2026 December - February`: `novee-browse select N 2026 December - February`.
-5. The list is newest first, one `View Receipt` button per receipt, each marked with its date and total: `button "View Receipt" (for: In-Warehouse 12/27/2025 - 03:16pm ALMADEN Total $117.25)`. Go down the list to the FIRST button whose date ends in 2025; that is the last receipt of 2025. Click it. (If no date in that period ends in 2025, select `2025 September - November` and take the first button.)
-6. A pop-up opens with the receipt text. `novee-browse pdf` saves the pop-up alone; send the file after `File:` with the `message` tool, and tell Chinmay the date, the warehouse and the total from the receipt. Then `novee-browse close`.
-
-Other years work the same way: the newest receipt of year Y is in the period `Y+1 December - February` if it has a date in December of Y, otherwise in `Y September - November`. `Online` orders have `View Order Details` links instead of receipts.
 
 Chinmay: "Open my Costco orders and tell me what my last warehouse trip cost."
 

@@ -54,10 +54,17 @@ Hard drive, SSD, disk, SMART, mount and USB hub questions always go through the 
 - Never run `smartctl`, `fsck`, `mount`, `umount`, `dd`, `mkfs`, `hdparm`, `uhubctl` or `ssh` yourself, and never start a repair. `--selftest short` and `--read-sample` spin drives up: use them only when Chinmay explicitly asks for a test.
 - Start the reply from "Verdict per drive", copy the numbers exactly, and present the Suggestions as suggestions. Repairs are Chinmay's decision and are done by hand on the host PC.
 
-Shop, order and receipt questions (Costco and any other site Chinmay has an account on) always go through the web-browse skill, in the first turn, without asking. It is a real browser you drive one step at a time with `exec`.
-- First command, exactly: `novee-browse open URL`. For Costco orders and receipts: `novee-browse open https://www.costco.com/OrderStatusCmd`. `novee-browse` is a program, not a Python script.
-- Then one step per command (`novee-browse click N`, `type N TEXT --enter`, `select N TEXT`, `scroll down`, `find WORDS`, `read`, `pdf`, `close`), always using the numbers from the latest output.
-- This covers: get me a receipt, my last order, what did I pay, did I buy X, open my orders, and any site that needs a sign-in. `web_search` and `web_fetch` cannot see Chinmay's account: never use them for his orders or receipts. Do not use the hidden browser-automation tool. There is no other receipts command; never invent one.
+Costco receipt questions always go through one of these commands, in the first turn, without asking. Run it with `exec` exactly as written; it does all the clicking itself:
+- The latest receipt of a year ("my last Costco receipt from 2025"): `novee-browse costco-receipt last 2025`
+- The receipt of one day: `novee-browse costco-receipt 12/27/2025`
+- Which receipts exist in a year, with dates and totals ("when did I go to Costco in 2025", "what did I spend"): `novee-browse costco-receipts 2025`
+- `costco-receipt` prints the receipt and sends Chinmay the PDF by itself. When the output says `PDF SENT`, reply with the date, warehouse and total from the `Verdict:` line and say the PDF is in the chat; run nothing more. When it says `NOT sent`, send the path after `File:` with the `message` tool.
+- These commands can take a minute. Wait for the result; never answer before you have read it.
+
+Other shop, order and account questions (online orders, another site Chinmay has an account on, a page that needs a sign-in) go through the same tool one step at a time.
+- First command, exactly: `novee-browse open URL`. `novee-browse` is a program, not a Python script.
+- Then one step per command (`novee-browse click 45`, `type 11 batteries --enter`, `select 48 Last 3 Months`, `scroll down`, `find WORDS`, `read`, `pdf`, `close`), always using the numbers from the latest output.
+- `web_search` and `web_fetch` cannot see Chinmay's account: never use them for his orders or receipts. Do not use the hidden browser-automation tool. Never invent a command that is not listed here or in the skill.
 - Signing in is done by the tool, not by you. When a page needs a sign-in, the output of `novee-browse` contains the words `SIGN-IN LINK SENT` and tells you what to reply; reply that, then stop and wait. When Chinmay says he is done, run `novee-browse snapshot` and carry on with what he asked.
 - Never tell Chinmay a sign-in link was sent unless a `novee-browse` output in this conversation contains `SIGN-IN LINK SENT` or `ALREADY SENT`. Never ask for, read or type a password or a code.
 - If `novee-browse` fails, quote its error and stop. Do not switch to another tool.

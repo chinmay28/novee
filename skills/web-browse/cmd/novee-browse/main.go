@@ -46,6 +46,11 @@ Keep:
 Session:
   status                is a browser open, and where
   close                 close the browser (it also closes itself when idle)
+Costco receipts (does the clicking itself; needs Chinmay signed in):
+  costco-receipt last [YEAR]   the newest warehouse receipt of the year: its text,
+                               and the PDF sent to Chinmay
+  costco-receipt MM/DD/YYYY    the receipt of that day
+  costco-receipts [YEAR]       the dates and totals of the year's receipts
 Sign-in (Novee never types a password):
   login-request         send Chinmay a link to this browser so he signs in himself,
                         from his phone or PC. Done automatically when a page asks
@@ -109,13 +114,18 @@ func (a *app) run(args []string) int {
 		"open": a.open, "snapshot": a.snapshot, "read": a.read, "find": a.find, "scroll": a.scroll, "back": a.back,
 		"click": a.click, "type": a.typeText, "select": a.selectOption, "screenshot": a.screenshot, "pdf": a.pdf,
 		"status": a.status, "close": a.closeSession, "login": a.login, "login-request": a.loginRequest,
+		"costco-receipt": a.costcoReceipt, "costco-receipts": a.costcoReceipts,
 	}
 	cmd, ok := cmds[args[0]]
 	if !ok {
 		fmt.Fprintf(a.out, "ERROR: unknown command %q. Run novee-browse without arguments for the list.\n", args[0])
 		return exitError
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	limit := 90 * time.Second
+	if strings.HasPrefix(args[0], "costco-") { // several pages are clicked through
+		limit = 4 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	code, err := cmd(ctx, args[1:])
 	if err != nil {

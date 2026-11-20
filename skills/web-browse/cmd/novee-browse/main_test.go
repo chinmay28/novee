@@ -41,6 +41,42 @@ const shop = `<html><head><title>Test Shop</title></head><body><main>
 <div style="height: 3000px"></div><a href="/orders">Footer orders link</a>
 </main></body></html>`
 
+// fakeCostco behaves like the Orders & Purchases page: a Warehouse tab, a
+// period drop-down named by the year a period ends in, two receipts per page,
+// and a receipt that opens in a pop-up.
+const fakeCostco = `<html><head><title>Orders & Purchases | Costco</title></head><body><main>
+<button>Online</button><button onclick="tab = true; draw()">Warehouse</button>
+<label>Showing <select id="period" aria-label="Showing" onchange="pg = 0; draw()">
+<option>Last 3 Months</option><option>2026 June - August</option><option>2026 December - February</option>
+<option>2025 September - November</option><option>2025 June - August</option></select></label>
+<div id="list">Online order 1</div>
+<div id="r" role="dialog" aria-modal="true" hidden style="position:fixed;top:10px;left:10px;width:300px;height:300px;background:#fff">
+<h2>In-Warehouse Receipt</h2><div id="body"></div><button onclick="this.parentElement.hidden = true">Close</button></div>
+</main><script>
+let tab = false, pg = 0;
+const data = {
+  'Last 3 Months': [['11/18/2026 - 12:02pm', 'ALMADEN', '$69.76']],
+  '2026 June - August': [['07/04/2026 - 10:00am', 'ALMADEN', '$10.00']],
+  '2026 December - February': [['02/14/2026 - 11:33am', 'ALMADEN', '$137.48'], ['01/02/2026 - 11:06am', 'ALMADEN', '$89.83'],
+    ['12/27/2025 - 03:16pm', 'ALMADEN', '$117.25'], ['12/21/2025 - 02:32pm', 'SAN JOSE', '$77.92']],
+  '2025 September - November': [['11/30/2025 - 09:00am', 'ALMADEN', '$20.00']],
+  '2025 June - August': [],
+};
+function draw() {
+  const list = document.getElementById('list');
+  if (!tab) { list.innerText = 'Online order 1'; return; }
+  const all = data[document.getElementById('period').value], rows = all.slice(pg * 2, pg * 2 + 2);
+  list.innerHTML = rows.map((r, i) => '<div class="card"><b>In-Warehouse</b> <span>' + r[0] + '</span> <span>' + r[1] +
+    '</span> <b>Total</b> ' + r[2] + ' <button onclick="show(' + (pg * 2 + i) + ')">View Receipt</button></div>').join('') +
+    (all.length > (pg + 1) * 2 ? '<button aria-label="Go to next page" onclick="pg++; draw()">&gt;</button>' : '');
+}
+function show(i) {
+  const r = data[document.getElementById('period').value][i];
+  document.getElementById('body').innerText = r[1] + ' #470 CHERRIES 9.99 TOTAL ' + r[2] + ' ' + r[0];
+  document.getElementById('r').hidden = false;
+}
+</script></body></html>`
+
 func site(ordered, noted *atomic.Int32) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, shop) })
@@ -64,6 +100,7 @@ func site(ordered, noted *atomic.Int32) http.Handler {
 if (!localStorage.getItem('seen')) document.getElementById('f').innerHTML = '<a href="/">Help</a>';
 if (location.hash !== '#again') localStorage.setItem('seen', '1');</script>`)
 	})
+	mux.HandleFunc("/costco", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fakeCostco) })
 	mux.HandleFunc("/ordered", func(w http.ResponseWriter, r *http.Request) { ordered.Add(1) })
 	mux.HandleFunc("/note", func(w http.ResponseWriter, r *http.Request) {
 		noted.Add(1)
@@ -189,6 +226,35 @@ func TestBrowseEndToEnd(t *testing.T) {
 	if code, got = run("click", "999"); code != exitError || !strings.Contains(got, "not on the page any more") {
 		t.Fatalf("stale number: %d %s", code, got)
 	}
+
+	// The Costco receipt commands do the clicking themselves: tab, period, page, pop-up, PDF.
+	t.Setenv("NOVEE_COSTCO_URL", srv.URL+"/costco")
+	gotFile := filepath.Join(t.TempDir(), "got")
+	sendFile := filepath.Join(t.TempDir(), "send")
+	if err := os.WriteFile(sendFile, []byte("#!/bin/sh\nprintf '%s|' \"$1\" > "+gotFile+"; head -c 5 \"$2\" >> "+gotFile+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NOVEE_BROWSE_NOTIFY_CMD", sendFile)
+	code, got = run("costco-receipt", "last", "2025")
+	if code != exitOK {
+		t.Fatalf("costco-receipt last 2025: %d %s", code, got)
+	}
+	wants(got, "Verdict: FOUND. The last Costco warehouse receipt of 2025: the receipt of 12/27/2025 03:16pm, ALMADEN, total $117.25.",
+		"CHERRIES 9.99 TOTAL $117.25", "PDF SENT to Chinmay")
+	if sentPDF, _ := os.ReadFile(gotFile); string(sentPDF) != "Costco receipt, 12/27/2025 03:16pm, ALMADEN, total $117.25|%PDF-" {
+		t.Errorf("the owner must get the receipt as a PDF, got %q", sentPDF)
+	}
+	_, got = run("costco-receipt", "12/21/2025", "--no-send")
+	wants(got, "receipt of 12/21/2025 02:32pm, SAN JOSE, total $77.92", "NOT sent", "File: ")
+	_, got = run("costco-receipt", "03/03/2025")
+	wants(got, "Verdict: NOT FOUND", "costco-receipts 2025")
+	_, got = run("costco-receipts", "2025")
+	wants(got, "Verdict: 3 Costco warehouse receipts dated 2025, newest first:", "- 12/27/2025 03:16pm, ALMADEN, total $117.25",
+		"- 12/21/2025 02:32pm, SAN JOSE, total $77.92", "- 11/30/2025 09:00am, ALMADEN, total $20.00")
+	if strings.Contains(got, "2026,") || strings.Contains(got, "/2026 ") {
+		t.Errorf("receipts of another year must not be listed:\n%s", got)
+	}
+	os.Unsetenv("NOVEE_BROWSE_NOTIFY_CMD")
 
 	// A sign-in page that comes up empty for a used profile gets a fresh profile.
 	if code, got = run("open", srv.URL+"/login/stale"); code != exitOK || !strings.Contains(got, `link "Help"`) {
