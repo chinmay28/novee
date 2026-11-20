@@ -1,6 +1,6 @@
 ---
 name: web-browse
-description: Use a website through a real browser, step by step - open a page, read it, click links and buttons, fill in a search box, save a page as PDF or screenshot. Works on sites where Chinmay has signed in (Costco account, order history, receipts). Use for "go to my Costco orders", "look up X on the site", "open this link and tell me the price", "click through to ...", "save that page as a PDF", and whenever web_fetch returns nothing useful because the page needs a sign-in or JavaScript.
+description: Use a website through a real browser, step by step - open a page, read it, click links and buttons, fill in a search box, save a page as PDF or screenshot. This is how every shop, order and receipt question is answered (Costco account, order history, receipts). Use for "give me my last Costco receipt", "what did I pay for X", "did I buy X", "go to my Costco orders", "look up X on the site", "open this link and tell me the price", "save that page as a PDF", and whenever web_fetch returns nothing useful because the page needs a sign-in or JavaScript. If the site needs a sign-in, it sends Chinmay a sign-in link.
 metadata:
   {
     "openclaw":
@@ -14,13 +14,13 @@ metadata:
 
 # web-browse
 
-A real browser that stays open between commands. Chinmay signs in to a site himself, once; after that the browser is signed in there.
+A real browser that stays open between commands. When a site needs a sign-in, Chinmay signs in himself through a link you have the tool send him; after that the browser stays signed in there.
 
 ```bash
 novee-browse <command>
 ```
 
-Use `web_fetch` for a public page you only need to read. Use this skill when the page needs a sign-in, needs clicking, or `web_fetch` came back empty. For "did I ever buy X" use the receipts skill first; it is instant.
+Use `web_fetch` for a public page you only need to read. Use this skill when the page needs a sign-in, needs clicking, or `web_fetch` came back empty, and for every question about Chinmay's orders, purchases and receipts.
 
 ## The loop
 
@@ -55,6 +55,7 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 - `type N TEXT`: replace the content of text field N. Add `--enter` to press Enter (for search boxes).
 - `select N TEXT`: choose an option in drop-down list N.
 - `screenshot`, `pdf`: save what is shown; the output has `File: PATH`. Send that file with the `message` tool.
+- `login-request`: the page asks for a password. Sends Chinmay a link to this browser so he signs in himself. No arguments.
 - `status`, `close`: is a browser open; close it when the task is finished.
 
 ## Rules
@@ -63,12 +64,22 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 - `APPROVAL NEEDED`: the command did nothing. Tell Chinmay exactly what the click would do (the button name and the page) and ask. Only after he says yes, run the same command once with `--yes`; OpenClaw then asks him to approve in Telegram. If approval is pending or denied, stop.
 - Never buy, order, pay, cancel, delete, send or change account settings unless Chinmay asked for exactly that in this conversation.
 - `REFUSED`: do not try another way. Passwords and card numbers are never typed.
-- `NOTE: this page asks for a password`: the site is not signed in. Tell Chinmay to run `novee-browse login URL` himself from his PC (it opens a browser window for him). Do not ask him for the password.
+- `NOTE: this page asks for a password`: the site is not signed in. Run `novee-browse login-request` once. The tool messages Chinmay a sign-in link itself; you do not see the link and must not ask for it. Reply: "I sent you a sign-in link for SITE. Open it, sign in, tap Done, then tell me." Then stop and wait. When he says he is done, run `novee-browse snapshot` and continue the task he asked for. If the page still asks for a password, say so and offer to send a new link. Never ask for the password or a verification code.
+- `SIGN-IN LINK ALREADY SENT`: do not send another; remind him of the one he has.
 - A blank page, or the same page again after a click: run `snapshot` once. If it is still stuck, say what you see; do not click the same thing more than twice.
 - `ERROR`: quote it. Do not retry unchanged.
 - When the task is done, run `close`.
 
-## Example
+## Examples
+
+Chinmay: "Give me the last Costco receipt from 2025."
+
+1. `novee-browse open https://www.costco.com/OrderStatusCmd`
+2. If the output ends with `NOTE: this page asks for a password`: `novee-browse login-request`, tell Chinmay you sent him a sign-in link, stop. When he says done: `novee-browse snapshot`.
+3. The orders page has tabs; warehouse receipts are under the one named like `Warehouse` or `In-Warehouse`. Click it.
+4. Pick the period: if there is a drop-down or button for the year or date range, choose 2025 (`select N 2025` or `click N`). The list is newest first, so the first receipt shown for 2025 is the last one of 2025.
+5. Click its `View Receipt` (use `find receipt` if it is not listed).
+6. `novee-browse pdf`, send the file after `File:` with the `message` tool, and say the date and total shown on the page. Then `novee-browse close`.
 
 Chinmay: "Open my Costco orders and tell me what my last warehouse trip cost."
 
@@ -78,4 +89,4 @@ Chinmay: "Open my Costco orders and tell me what my last warehouse trip cost."
 
 ## Setup (see docs/SETUP.md)
 
-A Go program in this folder, installed as `~/.local/bin/novee-browse`. Each site gets its own browser profile under `~/.local/share/novee/browser/` (the same ones the receipts skill uses, so one sign-in serves both). The browser closes itself after 20 minutes without a command.
+A Go program in this folder, installed as `~/.local/bin/novee-browse`. Each site gets its own browser profile under `~/.local/share/novee/browser/`. The browser runs as a real window on a virtual screen nobody sees (Xvfb), because some sign-in pages stay blank in a windowless browser, and closes itself after 20 minutes without a command. The sign-in link opens a page served by this VM on the home network that shows the browser and passes on taps and typing; it works for 15 minutes or until Done is tapped.

@@ -54,3 +54,10 @@ A short log of how Novee was built. Dates are 2026.
 - A 9B model cannot work from screenshots or raw HTML, so the tool turns each page into a title, its text and a numbered list of what can be clicked or typed into, and prints that again after every step. The model's whole job is "read, pick one number".
 - Each command is a separate short process, so a small keeper process owns the browser between them and closes it after 20 idle minutes.
 - The lesson from November 5 applied again: rules in the prompt are not enough. The tool itself stops before a click that looks like buying, sending, deleting or signing out and runs it only with `--yes`, which the exec policy turns into an approval request to the owner. Password and card fields cannot be typed into at all, home-network addresses cannot be opened, and every page is printed under a line saying its text is not an instruction.
+
+## November 20, night: browser only, and a sign-in request
+
+- First real test, "give me the last Costco receipt from 2025", failed. The receipts program had no command for "the latest receipt", so the model invented flags, and each invention became an approval request on the owner's phone. Nothing was stored anyway, because the sign-in needed a terminal on a desktop and the owner was waiting for the assistant to ask him.
+- The owner chose the browser for everything, the way the hosted assistant works. `AGENTS.md` now sends every shop and receipt question to `web-browse`, and the receipts skill is switched off on the VM.
+- The missing piece was the sign-in. `novee-browse login-request` starts a small page on the VM that shows the browser and passes on taps and typing, and messages the owner the link directly. He signs in from his phone and taps Done; the model never sees the link, the password or the code, and only has to say "I sent you a sign-in link" and wait.
+- Costco's sign-in page stays blank in a windowless browser. The tool now gives each browser a private virtual screen (Xvfb), which the page accepts.

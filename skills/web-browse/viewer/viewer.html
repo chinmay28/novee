@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Sign in for Novee</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: Canvas; color: CanvasText; }
+  header, footer { padding: 10px 14px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { margin: 4px 0; }
+  .muted { opacity: .7; font-size: 14px; }
+  #where { font-size: 13px; word-break: break-all; }
+  #screen { display: block; width: 100%; height: auto; border-block: 1px solid GrayText; cursor: pointer; touch-action: manipulation; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+  input, button { font: inherit; padding: 10px 12px; border-radius: 8px; border: 1px solid GrayText; }
+  #keys { flex: 1 1 180px; min-width: 0; }
+  #done { width: 100%; font-weight: 600; padding: 14px; }
+  #bar { position: sticky; bottom: 0; background: Canvas; border-top: 1px solid GrayText; }
+  #msg { min-height: 1.4em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sign in to {{.Site}} for Novee</h1>
+  <p class="muted">This is the browser on your Novee machine. Tap the picture to click, type in the box below it. What you type goes straight into that browser; the assistant does not see it. The link works for about {{.Minutes}} minutes.</p>
+  <p id="where" class="muted"></p>
+</header>
+<img id="screen" alt="The browser's screen">
+<footer id="bar">
+  <div class="row">
+    <input id="keys" type="password" placeholder="Tap here, then type" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" aria-label="Type into the page">
+    <button data-key="Backspace" aria-label="Backspace">⌫</button>
+    <button data-key="Tab">Tab</button>
+    <button data-key="Enter">Enter</button>
+    <button data-scroll="-0.6" aria-label="Scroll up">▲</button>
+    <button data-scroll="0.6" aria-label="Scroll down">▼</button>
+    <button id="reload" title="If the page is blank or stuck">Reload</button>
+  </div>
+  <p id="msg" class="muted"></p>
+  <button id="done">Done, I am signed in</button>
+</footer>
+<script>
+const token = {{.Token}};
+const q = '?t=' + encodeURIComponent(token);
+const screen_ = document.getElementById('screen'), keys = document.getElementById('keys');
+const msg = document.getElementById('msg'), where = document.getElementById('where');
+let finished = false, chain = Promise.resolve();
+
+// Events are sent one after another so that typing keeps its order.
+function send(event) {
+  chain = chain.then(() => fetch('/input' + q, {method: 'POST', body: JSON.stringify(event)}))
+    .then(r => { if (!r.ok) return r.text().then(t => { msg.textContent = t.trim(); }); msg.textContent = ''; })
+    .catch(() => { msg.textContent = 'Could not reach Novee. Are you on the home network?'; });
+  return chain;
+}
+
+function unquote(s) { try { return JSON.parse(s); } catch (e) { return ''; } }
+
+async function refresh() {
+  if (finished) return;
+  try {
+    const size = '&w=' + Math.round(document.documentElement.clientWidth) + '&h=' + Math.round(innerHeight * 0.62);
+    const r = await fetch('/frame' + q + size, {cache: 'no-store'});
+    if (r.status === 403) { finished = true; msg.textContent = 'This link has ended. Ask Novee for a new one if you still need to sign in.'; return; }
+    if (r.ok) {
+      const old = screen_.src;
+      screen_.src = URL.createObjectURL(await r.blob());
+      if (old) URL.revokeObjectURL(old);
+      where.textContent = unquote(r.headers.get('X-Page-Title')) + ' · ' + unquote(r.headers.get('X-Page-Url')).split('?')[0];
+    }
+  } catch (e) { msg.textContent = 'Could not reach Novee. Are you on the home network?'; }
+  setTimeout(refresh, 600);
+}
+
+screen_.addEventListener('click', e => {
+  const b = screen_.getBoundingClientRect();
+  send({type: 'click', x: (e.clientX - b.left) / b.width, y: (e.clientY - b.top) / b.height});
+  if (matchMedia('(pointer: fine)').matches) keys.focus();
+});
+keys.addEventListener('input', e => {
+  if (e.isComposing || !keys.value) return;
+  send({type: 'text', text: keys.value});
+  keys.value = '';
+});
+keys.addEventListener('compositionend', () => {
+  if (keys.value) { send({type: 'text', text: keys.value}); keys.value = ''; }
+});
+keys.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === 'Tab' || (e.key === 'Backspace' && !keys.value)) {
+    e.preventDefault();
+    send({type: 'key', key: e.key});
+  }
+});
+document.querySelectorAll('[data-key]').forEach(b => b.addEventListener('click', () => send({type: 'key', key: b.dataset.key})));
+document.querySelectorAll('[data-scroll]').forEach(b => b.addEventListener('click', () => send({type: 'scroll', by: parseFloat(b.dataset.scroll)})));
+document.getElementById('reload').addEventListener('click', () => send({type: 'reload'}));
+document.getElementById('done').addEventListener('click', async () => {
+  await send({type: 'done'});
+  finished = true;
+  document.getElementById('bar').innerHTML = '<p><b>Thank you.</b> Go back to Novee and say "done". You can close this page.</p>';
+});
+refresh();
+</script>
+</body>
+</html>

@@ -94,7 +94,9 @@ The report runs `smartctl`, `tune2fs -l` and `lsusb -v` through `sudo -n`, so th
 
 On the VM: `ssh-keygen -t ed25519 -N "" -f ~/.ssh/disk-health`, make sure the host's key is in `~/.ssh/known_hosts`, and copy `examples/disk-health.example.json` to `~/.config/novee/disk-health.json` with the real address. On the host PC itself `scripts/diskhealth.py` runs without a config and uses the local `~/.local/bin/novee-disk-report`.
 
-## 8. receipts
+## 8. receipts (optional, off by default)
+
+Since November 20 Novee answers receipt questions with the browser (section 9) and `AGENTS.md` no longer routes anything here. The skill stays in the repository as an offline archive for whoever wants one; on Novee's VM it is switched off with `openclaw config set skills.entries.receipts.enabled false --strict-json`, so the model is not offered two ways to do the same thing.
 
 A Go program, built on the VM. It needs Go 1.23 or newer and a Chrome or Chromium it can start.
 
@@ -137,19 +139,23 @@ cd ~/.openclaw/workspace/skills/web-browse
 go test ./... && go build -o ~/.local/bin/novee-browse ./cmd/novee-browse
 ```
 
-Apply `config/exec-approvals.json` again (section 7). It lets Novee run every `novee-browse` command except `login`, and anything with `--yes` asks the owner in Telegram first.
+Apply `config/exec-approvals.json` again (section 7). It lets Novee run every `novee-browse` command except `login` (it may run `login-request`, which only sends the owner a link), and anything with `--yes` asks the owner in Telegram first.
 
-Sign in to a site by hand, from a desktop on the LAN; close the window when done:
+The browser needs a screen to draw on, even though nobody looks at it: Costco's sign-in page stays blank in a windowless (headless) browser. Install Xvfb (`sudo apt install xvfb`) and the tool starts a private virtual screen with each browser. Without Xvfb, or with `NOVEE_BROWSE_HEADLESS=1`, it falls back to headless.
+
+Signing in: when a page asks for a password, Novee runs `novee-browse login-request`. The tool starts a small web page on the VM (port 7717, or a free one) that shows the browser and passes on taps and typing, and messages the owner the link with `openclaw message send`. The owner opens it on a phone or PC on the home network, signs in, ticks "keep me signed in" and taps Done. The link carries a random token and dies on Done, when the browser closes, or after 15 minutes. What is typed there goes into the browser and is not logged or shown to the model. It travels over plain HTTP inside the home network, so use it on a network you trust; from elsewhere, reach the VM through a VPN and set `NOVEE_BROWSE_VIEW_HOST` to the name or address the link should use.
+
+The old way still works from a desktop on the LAN (needs `xauth`); close the window when done:
 
 ```bash
 ssh -X VM_ADDRESS novee-browse login https://www.costco.com/OrderStatusCmd
 ```
 
-Each site has its own profile, named after the site (`costco`, `amazon`), under `~/.local/share/novee/browser/`. These are the profiles receipts uses, so signing in with either tool's `login` serves both. A profile can be open in one browser at a time: while a browse session is open on a site, a receipts sync of that site fails to start its browser (run `novee-browse close`, or wait for the 20-minute idle close).
+Each site has its own profile, named after the site (`costco`, `amazon`), under `~/.local/share/novee/browser/`; treat that folder like a password. A profile can be open in one browser at a time.
 
 What the guard does and does not do: it stops before clicks and form submissions whose label looks consequential and before typing into password or payment fields, and it refuses addresses on this machine or the home network. It judges by what the page says about an element, so it is a seat belt, not a guarantee; do not sign the browser in to a site where one wrong click would be costly. While a session is open, the browser's control port listens on 127.0.0.1, so any program running as the same user on the VM could drive it.
 
-Settings: `NOVEE_BROWSE_DIR` (session file, screenshots, saved pages; default `~/.local/share/novee/browse`), `NOVEE_BROWSE_IDLE_MINUTES`, `NOVEE_BROWSE_ALLOW_LAN=1`, and `open URL --headed` together with `xvfb-run` if a site serves the headless browser a blank page.
+Settings: `NOVEE_BROWSE_DIR` (session file, screenshots, saved pages; default `~/.local/share/novee/browse`), `NOVEE_BROWSE_IDLE_MINUTES`, `NOVEE_BROWSE_ALLOW_LAN=1`, `NOVEE_BROWSE_HEADLESS=1`, `NOVEE_BROWSE_VIEW_PORT`, `NOVEE_BROWSE_VIEW_HOST`, `NOVEE_BROWSE_NOTIFY_CMD` (a program that gets the sign-in message as its argument, instead of `openclaw message send`).
 
 ## Tests
 
@@ -160,4 +166,4 @@ python3 skills/vbox-manage/tests/test_novee_vbox.py
 (cd skills/web-browse && go test ./...)
 ```
 
-The second file checks the host helper's argument handling, the `--yes` and protected-VM guards and the SSH config entries against a fake VirtualBox. The first runs every sync case (pull, push, merge, conflict, privacy block, failed push) against a throwaway local remote. The Go tests cover the receipt parser, the search and the store, and drive a real browser against a fake shop (sign-in missing, sign-in present, a field the shop rejects, expiry); that last test is skipped when no browser is installed. The web-browse tests cover the approval rules and run every command against a fake shop in a real browser, checking that an unapproved "Place order" click reaches nothing.
+The second file checks the host helper's argument handling, the `--yes` and protected-VM guards and the SSH config entries against a fake VirtualBox. The first runs every sync case (pull, push, merge, conflict, privacy block, failed push) against a throwaway local remote. The Go tests cover the receipt parser, the search and the store, and drive a real browser against a fake shop (sign-in missing, sign-in present, a field the shop rejects, expiry); that last test is skipped when no browser is installed. The web-browse tests cover the approval rules and run every command against a fake shop in a real browser, checking that an unapproved "Place order" click reaches nothing, and that a sign-in request sends the link to the owner and not to the model, refuses a wrong token, passes typing on to the page and stops working after Done. They run headless; `NOVEE_BROWSE_TEST_VIRTUAL=1 go test ./...` runs them on a virtual screen.

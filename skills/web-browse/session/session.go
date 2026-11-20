@@ -31,7 +31,58 @@ type Info struct {
 	Port    int    `json:"port"`    // debugging port on 127.0.0.1
 	Keeper  int    `json:"keeper"`  // pid of the keeper process
 	Profile string `json:"profile"` // name of the browser profile in use
-	Headed  bool   `json:"headed"`
+	Mode    string `json:"mode"`    // Headless, Virtual or Headed
+}
+
+// How the browser is shown. Some sites (Costco's sign-in among them) send a
+// windowless browser an empty page, so a window on a virtual screen that
+// nobody sees is the default wherever Xvfb is installed.
+const (
+	Headless = "headless" // no window at all
+	Virtual  = "virtual"  // a real window on a private virtual screen (Xvfb)
+	Headed   = "headed"   // a real window on the desktop of whoever runs the command
+)
+
+// Mode picks how to show the browser: on the desktop if asked, else on a
+// virtual screen if Xvfb is installed and $NOVEE_BROWSE_HEADLESS is not 1.
+func Mode(headed bool) string {
+	if headed {
+		return Headed
+	}
+	if os.Getenv("NOVEE_BROWSE_HEADLESS") != "1" {
+		if _, err := exec.LookPath("Xvfb"); err == nil {
+			return Virtual
+		}
+	}
+	return Headless
+}
+
+// virtualScreen starts an Xvfb on a free display number and returns it as a
+// DISPLAY value.
+func virtualScreen() (*exec.Cmd, string, error) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		return nil, "", err
+	}
+	defer r.Close()
+	x := exec.Command("Xvfb", "-displayfd", "3", "-screen", "0", "1280x900x24", "-nolisten", "tcp")
+	x.ExtraFiles = []*os.File{w}
+	x.Stderr = os.Stderr
+	err = x.Start()
+	w.Close()
+	if err != nil {
+		return nil, "", err
+	}
+	_ = r.SetReadDeadline(time.Now().Add(10 * time.Second))
+	buf := make([]byte, 16)
+	n, _ := r.Read(buf) // Xvfb writes the number and a newline once it is ready
+	num := strings.TrimSpace(string(buf[:n]))
+	if _, err := strconv.Atoi(num); err != nil {
+		_ = x.Process.Kill()
+		return nil, "", errors.New("the virtual screen (Xvfb) did not start")
+	}
+	go x.Wait()
+	return x, ":" + num, nil
 }
 
 // Dir is where the session file, screenshots and saved pages go.
@@ -161,7 +212,7 @@ func Command(profile string, headed bool, extra ...string) (*exec.Cmd, error) {
 		return nil, err
 	}
 	args := []string{"--user-data-dir=" + dir, "--no-first-run", "--no-default-browser-check",
-		"--disable-blink-features=AutomationControlled", "--password-store=basic", "--window-size=1280,900"}
+		"--disable-blink-features=AutomationControlled", "--password-store=basic", "--window-size=1280,900", "--window-position=0,0"}
 	if !headed {
 		args = append(args, "--headless=new")
 	}
@@ -173,8 +224,8 @@ func Command(profile string, headed bool, extra ...string) (*exec.Cmd, error) {
 
 // Start launches a keeper and its browser and waits until the browser answers.
 // keeperArgs is the command line that runs RunKeeper in a new process, without
-// the profile, port and headed arguments, which Start appends.
-func Start(profile string, headed bool, keeperArgs []string) (*Info, error) {
+// the profile, port and mode arguments, which Start appends.
+func Start(profile, mode string, keeperArgs []string) (*Info, error) {
 	if _, err := FindExec(); err != nil {
 		return nil, err
 	}
@@ -193,7 +244,7 @@ func Start(profile string, headed bool, keeperArgs []string) (*Info, error) {
 		return nil, err
 	}
 	defer logf.Close()
-	args := append(append([]string{}, keeperArgs[1:]...), profile, strconv.Itoa(port), strconv.FormatBool(headed))
+	args := append(append([]string{}, keeperArgs[1:]...), profile, strconv.Itoa(port), mode)
 	cmd := exec.Command(keeperArgs[0], args...)
 	cmd.Stdout, cmd.Stderr = logf, logf
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // survive the command that started it
@@ -231,10 +282,23 @@ func Stop() error {
 // RunKeeper owns the browser: it starts it, records the session, and closes
 // it when asked to (SIGTERM), when the browser exits, or after idle time
 // without a Touch.
-func RunKeeper(profile string, port int, headed bool, idle time.Duration) error {
-	cmd, err := Command(profile, headed, "--remote-debugging-port="+strconv.Itoa(port), "about:blank")
+func RunKeeper(profile string, port int, mode string, idle time.Duration) error {
+	cmd, err := Command(profile, mode != Headless, "--remote-debugging-port="+strconv.Itoa(port), "about:blank")
 	if err != nil {
 		return err
+	}
+	if mode == Virtual {
+		x, display, err := virtualScreen()
+		if err != nil {
+			return err
+		}
+		defer x.Process.Kill()
+		for _, kv := range os.Environ() {
+			if !strings.HasPrefix(kv, "DISPLAY=") && !strings.HasPrefix(kv, "WAYLAND_DISPLAY=") {
+				cmd.Env = append(cmd.Env, kv)
+			}
+		}
+		cmd.Env = append(cmd.Env, "DISPLAY="+display)
 	}
 	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -243,7 +307,7 @@ func RunKeeper(profile string, port int, headed bool, idle time.Duration) error 
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 
-	data, _ := json.Marshal(Info{Port: port, Keeper: os.Getpid(), Profile: profile, Headed: headed})
+	data, _ := json.Marshal(Info{Port: port, Keeper: os.Getpid(), Profile: profile, Mode: mode})
 	if err := os.WriteFile(file(), data, 0o600); err != nil {
 		_ = cmd.Process.Kill()
 		return err

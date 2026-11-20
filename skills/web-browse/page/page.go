@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/input"
 	cdppage "github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/runtime"
@@ -83,6 +84,25 @@ func (p *Page) Goto(ctx context.Context, url string) error {
 	}
 	p.settle(ctx)
 	return nil
+}
+
+// Reload loads the page again.
+func (p *Page) Reload(ctx context.Context) error {
+	if err := p.run(ctx, chromedp.Reload()); err != nil {
+		return err
+	}
+	p.settle(ctx)
+	return nil
+}
+
+// WaitContent gives a page that draws itself with scripts (most sign-in
+// pages) up to limit to show something that can be read or clicked.
+func (p *Page) WaitContent(ctx context.Context, limit time.Duration) {
+	for deadline := time.Now().Add(limit); time.Now().Before(deadline) && ctx.Err() == nil; time.Sleep(time.Second) {
+		if s, err := p.Snapshot(ctx); err == nil && len(s.Elements) > 0 {
+			return
+		}
+	}
 }
 
 // Back goes to the previous page.
@@ -233,4 +253,67 @@ func (p *Page) PDF(ctx context.Context) ([]byte, error) {
 		return err
 	}))
 	return pdf, err
+}
+
+// The rest lets a person operate the tab from a picture of it: the sign-in
+// viewer shows JPEG and passes on where the owner tapped and what he typed.
+
+// JPEG returns a picture of the visible part of the page, small enough to send often.
+func (p *Page) JPEG(ctx context.Context) ([]byte, error) {
+	var img []byte
+	err := p.run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		var err error
+		img, err = cdppage.CaptureScreenshot().WithFormat(cdppage.CaptureScreenshotFormatJpeg).WithQuality(60).Do(ctx)
+		return err
+	}))
+	return img, err
+}
+
+// ClickAt clicks the point that is fx of the way across and fy of the way down the screen.
+func (p *Page) ClickAt(ctx context.Context, fx, fy float64) error {
+	var size struct{ W, H float64 }
+	if err := p.eval(ctx, `({w: innerWidth, h: innerHeight})`, &size); err != nil {
+		return err
+	}
+	return p.run(ctx, chromedp.MouseClickXY(fx*size.W, fy*size.H))
+}
+
+// Insert types text into whatever has the focus.
+func (p *Page) Insert(ctx context.Context, text string) error {
+	return p.run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return input.InsertText(text).Do(ctx)
+	}))
+}
+
+// Press presses one of the keys "Enter", "Tab" or "Backspace".
+func (p *Page) Press(ctx context.Context, key string) error {
+	k, ok := map[string]string{"Enter": kb.Enter, "Tab": kb.Tab, "Backspace": kb.Backspace}[key]
+	if !ok {
+		return fmt.Errorf("unknown key %q", key)
+	}
+	return p.run(ctx, chromedp.KeyEvent(k))
+}
+
+// ScrollBy moves by a fraction of a screen; negative is up.
+func (p *Page) ScrollBy(ctx context.Context, screens float64) error {
+	return p.eval(ctx, fmt.Sprintf(`scrollBy(0, innerHeight * %f)`, screens), nil)
+}
+
+// Where returns the title and address of the page, and whether it shows a password field.
+func (p *Page) Where(ctx context.Context) (title, url string, password bool, err error) {
+	var w struct {
+		Title, URL string
+		Password   bool
+	}
+	err = p.eval(ctx, `({title: document.title, url: location.href, password: Array.from(document.querySelectorAll('input[type=password]')).some(e => e.offsetParent !== null)})`, &w)
+	return w.Title, w.URL, w.Password, err
+}
+
+// Resize lays the page out for a screen of w by h points, drawn at twice that
+// many pixels, so that it is readable on a phone. It lasts as long as this
+// process stays attached.
+func (p *Page) Resize(ctx context.Context, w, h int) error {
+	return p.run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return emulation.SetDeviceMetricsOverride(int64(w), int64(h), 2, false).Do(ctx)
+	}))
 }

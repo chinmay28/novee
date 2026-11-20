@@ -51,7 +51,7 @@ func Click(e page.Element) (Decision, string) {
 func Type(e page.Element, enter bool) (Decision, string) {
 	switch {
 	case e.Password:
-		return Refuse, "this is a password field. Novee never types passwords; Chinmay signs in himself with `novee-browse login URL`"
+		return Refuse, "this is a password field. Novee never types passwords. Run `novee-browse login-request`: it sends Chinmay a link to sign in himself"
 	case e.Payment:
 		return Refuse, "this field takes a card, bank or identity number. Novee never types those"
 	case e.Kind != "input" && e.Kind != "textarea":

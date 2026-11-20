@@ -3,21 +3,28 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/chinmay28/novee/skills/web-browse/session"
+	"github.com/chinmay28/novee/skills/web-browse/viewer"
 )
 
 // The test binary doubles as the keeper process, as the real binary does.
 func TestMain(m *testing.M) {
 	if len(os.Args) == 5 && os.Args[1] == "_keeper" {
 		os.Exit(keeperMain(os.Args[2:]))
+	}
+	if len(os.Args) == 3 && os.Args[1] == "_viewer" {
+		os.Exit(viewerMain(os.Args[2]))
 	}
 	os.Exit(m.Run())
 }
@@ -44,7 +51,7 @@ func site(ordered, noted *atomic.Int32) http.Handler {
 		fmt.Fprintf(w, `<title>Search</title><main>Results for %s</main>`, r.URL.Query().Get("q"))
 	})
 	mux.HandleFunc("/signin", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `<title>Sign In</title><form><input name="email" aria-label="Email"><input type="password" aria-label="Password"><button>Sign In</button></form>`)
+		fmt.Fprint(w, `<title>Sign In</title><form><input name="email" aria-label="Email" autofocus><input type="password" aria-label="Password"><button>Sign In</button></form>`)
 	})
 	mux.HandleFunc("/ordered", func(w http.ResponseWriter, r *http.Request) { ordered.Add(1) })
 	mux.HandleFunc("/note", func(w http.ResponseWriter, r *http.Request) {
@@ -64,10 +71,13 @@ func TestBrowseEndToEnd(t *testing.T) {
 	srv := httptest.NewServer(site(&ordered, &noted))
 	defer srv.Close()
 	t.Setenv("NOVEE_BROWSE_DIR", t.TempDir())
+	if os.Getenv("NOVEE_BROWSE_TEST_VIRTUAL") != "1" { // set it to run the test on a virtual screen instead
+		t.Setenv("NOVEE_BROWSE_HEADLESS", "1")
+	}
 	t.Setenv("NOVEE_BROWSER_DIR", t.TempDir())
 
 	out := &bytes.Buffer{}
-	a := &app{out: out, keeper: []string{os.Args[0], "_keeper"}}
+	a := &app{out: out, keeper: []string{os.Args[0], "_keeper"}, viewer: []string{os.Args[0], "_viewer"}}
 	run := func(args ...string) (int, string) {
 		t.Helper()
 		out.Reset()
@@ -158,11 +168,89 @@ func TestBrowseEndToEnd(t *testing.T) {
 		t.Fatalf("stale number: %d %s", code, got)
 	}
 
-	// Passwords are never typed, and the owner is pointed to login.
+	// Passwords are never typed. The owner is sent a link to the browser and signs in himself.
 	_, got = run("open", srv.URL+"/signin")
-	wants(got, "NOTE: this page asks for a password", "novee-browse login "+srv.URL+"/signin")
+	wants(got, "NOTE: this page asks for a password", "Run now: novee-browse login-request")
 	if code, got = run("type", num(got, "Password"), "hunter2"); code != exitError || !strings.Contains(got, "REFUSED: this is a password field") {
 		t.Fatalf("password: %d %s", code, got)
+	}
+	sent := filepath.Join(t.TempDir(), "sent")
+	notify := filepath.Join(t.TempDir(), "notify")
+	if err := os.WriteFile(notify, []byte("#!/bin/sh\nprintf '%s' \"$1\" > "+sent+"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NOVEE_BROWSE_NOTIFY_CMD", notify)
+	t.Setenv("NOVEE_BROWSE_VIEW_HOST", "127.0.0.1")
+	t.Setenv("NOVEE_BROWSE_VIEW_PORT", "0")
+	code, got = run("login-request")
+	if code != exitOK {
+		t.Fatalf("login-request: %d %s", code, got)
+	}
+	wants(got, "SIGN-IN LINK SENT to Chinmay", "novee-browse snapshot")
+	msg, _ := os.ReadFile(sent)
+	link := regexp.MustCompile(`http://127\.0\.0\.1:\d+/\?t=[0-9a-f]{32}`).FindString(string(msg))
+	if link == "" {
+		t.Fatalf("the owner's message has no link: %q", msg)
+	}
+	if strings.Contains(got, link) || strings.Contains(got, "?t=") {
+		t.Errorf("the link must go to the owner, not to the model:\n%s", got)
+	}
+	base, token, _ := strings.Cut(link, "/?t=")
+	get := func(path string) (int, []byte) {
+		t.Helper()
+		resp, err := http.Get(base + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, body
+	}
+	do := func(event string) int {
+		t.Helper()
+		resp, err := http.Post(base+"/input?t="+token, "application/json", strings.NewReader(event))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if st, _ := get("/?t=wrong"); st != http.StatusForbidden {
+		t.Errorf("a wrong token must be refused, got %d", st)
+	}
+	if st, _ := get("/frame"); st != http.StatusForbidden {
+		t.Errorf("no token must be refused, got %d", st)
+	}
+	if st, body := get("/?t=" + token); st != 200 || !strings.Contains(string(body), "Sign in to main for Novee") {
+		t.Errorf("viewer page: %d %s", st, body)
+	}
+	if st, body := get("/frame?t=" + token); st != 200 || !bytes.HasPrefix(body, []byte("\xff\xd8")) {
+		t.Errorf("frame: %d, %d bytes, not a JPEG", st, len(body))
+	}
+	// What the owner types reaches the page (the e-mail field has the focus).
+	if st := do(`{"type":"text","text":"me@example.com"}`); st != 200 {
+		t.Errorf("typing through the viewer: %d", st)
+	}
+	_, got = run("snapshot")
+	wants(got, `value="me@example.com"`)
+	if code, got = run("login-request"); code != exitOK || !strings.Contains(got, "ALREADY SENT") {
+		t.Errorf("a second request must not send a second link: %d %s", code, got)
+	}
+	if st := do(`{"type":"done"}`); st != 200 {
+		t.Errorf("done: %d", st)
+	}
+	for i := 0; i < 50; i++ {
+		if _, ok := viewer.Current(); !ok {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if _, ok := viewer.Current(); ok {
+		t.Error("the viewer must end after Done")
+	}
+	if resp, err := http.Get(link); err == nil {
+		resp.Body.Close()
+		t.Error("the link must stop working after Done")
 	}
 
 	for kind, magic := range map[string]string{"screenshot": "\x89PNG", "pdf": "%PDF-"} {

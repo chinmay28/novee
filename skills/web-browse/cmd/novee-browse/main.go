@@ -9,14 +9,18 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/chinmay28/novee/skills/web-browse/guard"
 	"github.com/chinmay28/novee/skills/web-browse/page"
 	"github.com/chinmay28/novee/skills/web-browse/session"
+	"github.com/chinmay28/novee/skills/web-browse/viewer"
 )
 
 const usage = `novee-browse: use a website through a real browser, step by step.
@@ -42,6 +46,9 @@ Keep:
 Session:
   status                is a browser open, and where
   close                 close the browser (it also closes itself when idle)
+Sign-in (Novee never types a password):
+  login-request         the page asks for a password: send Chinmay a link to this
+                        browser so he signs in himself, from his phone or PC
 Owner only (opens a browser window):
   login URL             sign in to a site by hand; later commands are signed in
 
@@ -59,6 +66,7 @@ const (
 type app struct {
 	out    io.Writer
 	keeper []string // command line that runs this program's keeper
+	viewer []string // command line that runs this program's sign-in viewer
 }
 
 func main() {
@@ -70,7 +78,10 @@ func main() {
 		fmt.Println("ERROR:", err)
 		os.Exit(exitError)
 	}
-	a := &app{out: os.Stdout, keeper: []string{exe, "_keeper"}}
+	if len(os.Args) == 3 && os.Args[1] == "_viewer" {
+		os.Exit(viewerMain(os.Args[2]))
+	}
+	a := &app{out: os.Stdout, keeper: []string{exe, "_keeper"}, viewer: []string{exe, "_viewer"}}
 	os.Exit(a.run(os.Args[1:]))
 }
 
@@ -81,7 +92,7 @@ func keeperMain(args []string) int {
 	if m, err := strconv.Atoi(os.Getenv("NOVEE_BROWSE_IDLE_MINUTES")); err == nil && m > 0 {
 		idle = time.Duration(m) * time.Minute
 	}
-	if err := session.RunKeeper(args[0], port, args[2] == "true", idle); err != nil {
+	if err := session.RunKeeper(args[0], port, args[2], idle); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return exitError
 	}
@@ -96,7 +107,7 @@ func (a *app) run(args []string) int {
 	cmds := map[string]func(context.Context, []string) (int, error){
 		"open": a.open, "snapshot": a.snapshot, "read": a.read, "find": a.find, "scroll": a.scroll, "back": a.back,
 		"click": a.click, "type": a.typeText, "select": a.selectOption, "screenshot": a.screenshot, "pdf": a.pdf,
-		"status": a.status, "close": a.closeSession, "login": a.login,
+		"status": a.status, "close": a.closeSession, "login": a.login, "login-request": a.loginRequest,
 	}
 	cmd, ok := cmds[args[0]]
 	if !ok {
@@ -200,7 +211,7 @@ func (a *app) show(ctx context.Context, p *page.Page) (int, error) {
 		fmt.Fprintf(a.out, "(%d more elsewhere on the page: `scroll down`, or `find WORDS` to search the whole page)\n", hidden)
 	}
 	if password {
-		fmt.Fprintf(a.out, "NOTE: this page asks for a password, so the site is not signed in. Novee cannot sign in. Tell Chinmay to run on his PC: novee-browse login %s\n", s.URL)
+		fmt.Fprintln(a.out, "NOTE: this page asks for a password, so the site is not signed in. Never type it. Run now: novee-browse login-request\nThat sends Chinmay a link to sign in himself.")
 	}
 	return exitOK, nil
 }
@@ -224,13 +235,14 @@ func (a *app) open(ctx context.Context, args []string) (int, error) {
 	if code := a.allowed(d, why, *yes, "novee-browse open "+url); code != exitOK {
 		return code, nil
 	}
-	want := session.SiteProfile(url)
-	if in, ok := session.Current(); !ok || in.Profile != want || in.Headed != *headed {
+	want, mode := session.SiteProfile(url), session.Mode(*headed)
+	if in, ok := session.Current(); !ok || in.Profile != want || in.Mode != mode {
 		// Each site has its own profile, so signing in to one never exposes another.
+		viewer.Stop()
 		if err := session.Stop(); err != nil {
 			return exitError, err
 		}
-		if _, err := session.Start(want, *headed, a.keeper); err != nil {
+		if _, err := session.Start(want, mode, a.keeper); err != nil {
 			return exitError, err
 		}
 	}
@@ -238,6 +250,7 @@ func (a *app) open(ctx context.Context, args []string) (int, error) {
 		if err := p.Goto(ctx, url); err != nil {
 			return exitError, fmt.Errorf("%s did not load: %w", url, err)
 		}
+		p.WaitContent(ctx, 12*time.Second)
 		return a.show(ctx, p)
 	})
 }
@@ -516,6 +529,7 @@ func (a *app) status(ctx context.Context, _ []string) (int, error) {
 }
 
 func (a *app) closeSession(context.Context, []string) (int, error) {
+	viewer.Stop()
 	if _, ok := session.Current(); !ok {
 		fmt.Fprintln(a.out, "No browser was open.")
 		return exitOK, session.Stop()
@@ -554,5 +568,75 @@ func (a *app) login(_ context.Context, args []string) (int, error) {
 		return exitError, fmt.Errorf("the browser ended with: %w", err)
 	}
 	fmt.Fprintf(a.out, "Saved. Novee's browser is now signed in on this site (profile %s).\n", session.ProfileDir(profile))
+	return exitOK, nil
+}
+
+const viewerLimit = 15 * time.Minute
+
+// viewerMain is the detached process that serves the sign-in viewer.
+func viewerMain(site string) int {
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGTERM, syscall.SIGINT)
+	how, err := viewer.Run(site, viewerLimit, stop)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return exitError
+	}
+	fmt.Fprintln(os.Stderr, "sign-in viewer ended:", how)
+	return exitOK
+}
+
+// loginRequest asks the owner to sign in on the page that is open, through a
+// link to this browser. The link goes to the owner directly, not through the
+// model, so it cannot be mangled or leaked on the way.
+func (a *app) loginRequest(ctx context.Context, args []string) (int, error) {
+	if len(args) != 0 {
+		return exitError, errors.New("usage: login-request (first `open` the page that asks for the password)")
+	}
+	var site string
+	if code, err := a.withPage(func(p *page.Page) (int, error) {
+		_, u, _, err := p.Where(ctx)
+		site = session.SiteProfile(u)
+		return exitOK, err
+	}); err != nil {
+		return code, err
+	}
+	const after = "Now reply to Chinmay: \"I sent you a sign-in link for %s. Open it, sign in, tap Done, then tell me.\" Then stop and wait. When he says he is done, run: novee-browse snapshot\n"
+	if in, ok := viewer.Current(); ok {
+		fmt.Fprintf(a.out, "SIGN-IN LINK ALREADY SENT %d minutes ago and still valid. Do not send another.\n"+after,
+			int(time.Since(in.Started).Minutes()), site)
+		return exitOK, nil
+	}
+	logf, err := os.OpenFile(filepath.Join(session.Dir(), "viewer.log"), os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return exitError, err
+	}
+	defer logf.Close()
+	cmd := exec.Command(a.viewer[0], append(append([]string{}, a.viewer[1:]...), site)...)
+	cmd.Stdout, cmd.Stderr = logf, logf
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // survive this command
+	if err := cmd.Start(); err != nil {
+		return exitError, err
+	}
+	go cmd.Wait()
+	var in *viewer.Info
+	for deadline := time.Now().Add(10 * time.Second); in == nil && time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if v, ok := viewer.Current(); ok && v.Pid == cmd.Process.Pid {
+			in = v
+		}
+	}
+	if in == nil {
+		tail, _ := os.ReadFile(filepath.Join(session.Dir(), "viewer.log"))
+		return exitError, fmt.Errorf("the sign-in page did not start: %s", strings.TrimSpace(string(tail)))
+	}
+	text := fmt.Sprintf("Novee needs you to sign in to %s.\nOpen this on your home network: %s\nSign in there (tick \"keep me signed in\"), tap Done, then tell Novee. The link works for %d minutes.",
+		site, in.Link(), int(viewerLimit.Minutes()))
+	if err := notifyOwner(text); err != nil {
+		// No way to message the owner from here: the model has to pass the link on.
+		fmt.Fprintf(a.out, "SIGN-IN LINK (send this to Chinmay exactly as written, on its own line):\n%s\n", in.Link())
+		fmt.Fprintf(a.out, "Tell him: open it, sign in to %s, tap Done, then tell you. Then stop and wait. When he says he is done, run: novee-browse snapshot\n", site)
+		return exitOK, nil
+	}
+	fmt.Fprintf(a.out, "SIGN-IN LINK SENT to Chinmay in a separate message (valid %d minutes).\n"+after, int(viewerLimit.Minutes()), site)
 	return exitOK, nil
 }
