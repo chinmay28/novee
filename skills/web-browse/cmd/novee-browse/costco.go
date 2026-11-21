@@ -100,7 +100,7 @@ func (a *app) signedIn(ctx context.Context, url, site string) (bool, int, error)
 		return false, code, err
 	}
 	out := buf.String()
-	for _, mark := range []string{"NOTE: this page asks for a password", "NOT loaded again"} {
+	for _, mark := range []string{"NOTE: this page asks you to sign in", "NOT loaded again"} {
 		if i := strings.Index(out, mark); i >= 0 {
 			if mark == "NOT loaded again" {
 				i = 0

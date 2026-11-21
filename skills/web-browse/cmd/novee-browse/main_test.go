@@ -416,7 +416,7 @@ func TestBrowseEndToEnd(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("open a sign-in page: %d %s", code, got)
 	}
-	wants(got, "NOTE: this page asks for a password", "SIGN-IN LINK SENT to Chinmay", "novee-browse snapshot")
+	wants(got, "NOTE: this page asks you to sign in", "SIGN-IN LINK SENT to Chinmay", "novee-browse snapshot")
 	signin := got
 	if code, got = run("type", num(got, "Password"), "hunter2"); code != exitError || !strings.Contains(got, "REFUSED: this is a password field") {
 		t.Fatalf("password: %d %s", code, got)

@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -225,10 +226,11 @@ func (a *app) show(ctx context.Context, p *page.Page) (int, error) {
 	} else {
 		fmt.Fprintln(a.out, "Text: (none; the page may still be loading, or it is blank. Try `snapshot` once more.)")
 	}
-	shown, hidden, password := 0, 0, false
+	shown, hidden, password, account := 0, 0, false, false
 	fmt.Fprintln(a.out, "Things to click or type into on this screen (numbers are valid until the next command):")
 	for _, e := range s.Elements {
 		password = password || (e.Password && e.InView)
+		account = account || (e.InView && e.Kind == "input" && (e.Type == "email" || e.Type == "tel" || accountField.MatchString(e.Name)))
 		if !e.InView || shown == maxShown {
 			hidden++
 			continue
@@ -246,9 +248,14 @@ func (a *app) show(ctx context.Context, p *page.Page) (int, error) {
 	if hidden > 0 {
 		fmt.Fprintf(a.out, "(%d more elsewhere on the page: `scroll down`, or `find WORDS` to search the whole page)\n", hidden)
 	}
+	// A sign-in page asks for a password, or (Uber, and others that send a code)
+	// only for an e-mail address or phone number on a page that says it is for signing in.
+	if u, err := url.Parse(s.URL); !password && account && err == nil {
+		password = signInAddress.MatchString(u.Host+u.Path) || signInAddress.MatchString(s.Title)
+	}
 	if password {
 		// A small model tends to say it asked for the sign-in without doing it, so the tool does it.
-		fmt.Fprintln(a.out, "NOTE: this page asks for a password, so the site is not signed in. Never type it.")
+		fmt.Fprintln(a.out, "NOTE: this page asks you to sign in, so the site is not signed in. Never type a password or a code.")
 		if err := a.requestSignIn(session.SiteProfile(s.URL), true); err != nil {
 			fmt.Fprintln(a.out, "ERROR:", err)
 		}
@@ -345,7 +352,10 @@ func (a *app) open(ctx context.Context, args []string) (int, error) {
 }
 
 // signInAddress matches the address of a page whose only purpose is signing in.
-var signInAddress = regexp.MustCompile(`(?i)(sign-?in|log-?in|logon|oauth2?|authorize|sso)`)
+var signInAddress = regexp.MustCompile(`(?i)(sign[- ]?in|log[- ]?in|logon|oauth2?|authorize|sso|\bauth\b|identity)`)
+
+// accountField matches the name of a field that takes who you are.
+var accountField = regexp.MustCompile(`(?i)(e-?mail|phone|mobile number|username|user name)`)
 
 func (a *app) snapshot(ctx context.Context, _ []string) (int, error) {
 	return a.withPage(func(p *page.Page) (int, error) { return a.show(ctx, p) })
