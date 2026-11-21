@@ -108,19 +108,19 @@ func (a *app) yearPDF(ctx context.Context, store string, args []string) (int, er
 	switch args[0] {
 	case "status":
 		if !running {
-			fmt.Fprintln(a.out, "No receipts PDF job is running. The last one has finished; its PDFs were sent to Chinmay if it found receipts.")
+			fmt.Fprintln(a.out, "No background job is running. The last one has finished and sent Chinmay its result.")
 			return exitOK, nil
 		}
-		fmt.Fprintf(a.out, "A receipts PDF job is RUNNING: %s. Chinmay gets the PDFs in the chat when it is done. Run nothing more.\n", job.describe())
+		fmt.Fprintf(a.out, "A background job is RUNNING: %s. Chinmay gets the result in the chat when it is done. Run nothing more.\n", job.describe())
 		return exitOK, nil
 	case "stop":
 		if !running {
-			fmt.Fprintln(a.out, "No receipts PDF job was running.")
+			fmt.Fprintln(a.out, "No background job was running.")
 			return exitOK, nil
 		}
 		_ = syscall.Kill(job.Pid, syscall.SIGTERM)
 		_ = os.Remove(jobFile())
-		fmt.Fprintln(a.out, "The receipts PDF job was stopped. Nothing was sent.")
+		fmt.Fprintln(a.out, "The background job was stopped. Nothing was sent.")
 		return exitOK, nil
 	}
 	_, names, err := parseYears(args)
@@ -128,7 +128,7 @@ func (a *app) yearPDF(ctx context.Context, store string, args []string) (int, er
 		return exitError, fmt.Errorf("%w. %s", err, usage)
 	}
 	if running {
-		fmt.Fprintf(a.out, "A receipts PDF job is ALREADY RUNNING: %s. Only one runs at a time; do not start another. Tell Chinmay it is still working and that the PDFs will arrive in the chat.\n", job.describe())
+		fmt.Fprintf(a.out, "A background job is ALREADY RUNNING: %s. Only one runs at a time; do not start another. Tell Chinmay it is still working and that the PDFs will arrive in the chat.\n", job.describe())
 		return exitOK, nil
 	}
 	if _, err := exec.LookPath("gs"); err != nil {

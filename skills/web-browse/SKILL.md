@@ -106,7 +106,9 @@ Never loop over `costco-receipt` to collect many receipts: each run sends Chinma
 - `novee-browse doordash-receipts 2026`: every order of the year with date, store and total.
 - `novee-browse doordash-year-pdf all` (or a year): one PDF per calendar year with every receipt, made by a background job that sends the files itself. About 15 minutes per year.
 
-- `novee-browse doordash-spending 2026`: what was spent per month, worked out from every receipt of the year. For each month it gives the number of orders, the amount charged, the DoorDash credits used (the receipt line "DoorDash Credits") and the two together (net), with a year total, and sends Chinmay that breakdown plus a file with one line per order. A background job: about 20 minutes the first time for a year, a minute or two after that. `doordash-spending status` says how far it is.
+- `novee-browse doordash-spending 2026`: the spending report of a year, worked out from every receipt and sent to Chinmay by the tool, with a file that has one line per order. It has three parts. Food and grocery spending per month and in total, split into restaurants and grocery, where net = charged + DoorDash credits used (the receipt line "DoorDash Credits"). Gift cards bought through DoorDash, listed apart and left out of the food figures, as are cancelled orders. And a credits check: credits used, credits given back for refunds and cancellations, the balance now, how many $50 gift cards that amounts to, and the DoorDash gift cards bought at Costco that year. A background job: about 25 minutes the first time for a year, a few minutes after that. `doordash-spending status` says how far it is.
+
+DoorDash keeps no list of redeemed gift cards, in the app or on the site: redeemed cards just raise the credit balance. The credits check above is the way to follow them.
 
 For any question about amounts over many orders (spending, totals, averages, credits) use `doordash-spending`. Do not add numbers up yourself and do not answer from the order list: an order paid with credits shows $0.00 there.
 

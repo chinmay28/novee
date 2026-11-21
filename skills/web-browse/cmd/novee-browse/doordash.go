@@ -44,6 +44,7 @@ type ddOrder struct {
 	Store string
 	Total string
 	URL   string
+	Shop  string // the address of the store's own page, if the list links to it
 }
 
 func (o ddOrder) String() string {
@@ -63,9 +64,12 @@ var (
 // for each day, then per order the store, a price line and "View Receipt".
 func ddParse(s page.Snapshot, now time.Time) ([]ddOrder, error) {
 	var links []string
+	shops := map[string]string{}
 	for _, e := range s.Elements {
 		if e.Kind == "link" && e.Name == "View Receipt" {
 			links = append(links, e.Href)
+		} else if e.Kind == "link" && strings.Contains(e.Href, "/store/") {
+			shops[e.Name] = e.Href
 		}
 	}
 	var out []ddOrder
@@ -91,7 +95,7 @@ func ddParse(s page.Snapshot, now time.Time) ([]ddOrder, error) {
 			store, total = prev, ddPrice.FindStringSubmatch(line)[1]
 		case line == "View Receipt":
 			if len(out) < len(links) && !day.IsZero() {
-				out = append(out, ddOrder{Day: day, Store: store, Total: total, URL: links[len(out)]})
+				out = append(out, ddOrder{Day: day, Store: store, Total: total, URL: links[len(out)], Shop: shops[store]})
 			}
 		}
 		prev = line

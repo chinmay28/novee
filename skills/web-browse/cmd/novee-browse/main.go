@@ -140,7 +140,7 @@ func (a *app) run(args []string) int {
 	}
 	if job, ok := currentJob(); ok && args[0] != "status" && !strings.HasSuffix(args[0], "-year-pdf") && args[0] != "doordash-spending" {
 		// The job is clicking through the same page.
-		fmt.Fprintf(a.out, "BUSY: a receipts PDF job is using the browser (%s). Chinmay gets its PDFs in the chat when it is done. Do not run browser commands until then; to check: novee-browse %s-year-pdf status\n", job.describe(), job.Store)
+		fmt.Fprintf(a.out, "BUSY: a background job is using the browser (%s). Chinmay gets its result in the chat when it is done. Do not run browser commands until then; to check: novee-browse %s-year-pdf status\n", job.describe(), job.Store)
 		return exitError
 	}
 	limit := 90 * time.Second

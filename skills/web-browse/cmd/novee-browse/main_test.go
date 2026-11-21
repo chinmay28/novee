@@ -297,7 +297,7 @@ func TestBrowseEndToEnd(t *testing.T) {
 			t.Fatalf("costco-year-pdf: %d %s", code, got)
 		}
 		wants(got, "STARTED a background job for Costco, 2025", "ONE PDF per calendar year")
-		if code, got = run("snapshot"); code != exitError || !strings.Contains(got, "BUSY: a receipts PDF job") {
+		if code, got = run("snapshot"); code != exitError || !strings.Contains(got, "BUSY: a background job") {
 			t.Errorf("while the job runs, other commands must leave the browser alone: %d %s", code, got)
 		}
 		_, got = run("costco-year-pdf", "2025")
@@ -323,7 +323,7 @@ func TestBrowseEndToEnd(t *testing.T) {
 			t.Errorf("the year PDF must have one page per receipt (4), has %d", n)
 		}
 		_, got = run("costco-year-pdf", "status")
-		wants(got, "No receipts PDF job is running")
+		wants(got, "No background job is running")
 	}
 	// DoorDash: the year of a list entry is worked out, the order page confirms it.
 	t.Setenv("NOVEE_DOORDASH_URL", srv.URL+"/doordash")
@@ -360,12 +360,15 @@ func TestBrowseEndToEnd(t *testing.T) {
 		spent, _ := os.ReadFile(sentLog)
 		month := now.Format("Jan")
 		if now.Year() == old.Year() { // the third order is in the same year, in another month
-			if !strings.Contains(string(spent), "Total: 3 orders, charged $62.70 + credits $15.00 = net $77.70") {
+			if !strings.Contains(string(spent), "Total: 3 orders, net $77.70 (charged $62.70 + credits $15.00)") {
 				t.Errorf("spending report:\n%s", spent)
 			}
-		} else if !strings.Contains(string(spent), "- "+month+": 2 orders, charged $43.80 + credits $10.00 = net $53.80") ||
-			!strings.Contains(string(spent), "Total: 2 orders, charged $43.80 + credits $10.00 = net $53.80") {
+		} else if !strings.Contains(string(spent), "- "+month+": 2 orders, net $53.80 (charged $43.80 + credits $10.00). Restaurants $53.80, grocery $0.00") ||
+			!strings.Contains(string(spent), "Total: 2 orders, net $53.80 (charged $43.80 + credits $10.00)") {
 			t.Errorf("spending report:\n%s", spent)
+		}
+		if !strings.Contains(string(spent), "DoorDash credits check") || !strings.Contains(string(spent), "show no DoorDash gift cards") {
+			t.Errorf("the report must account for the credits and check Costco:\n%s", spent)
 		}
 		if !strings.Contains(string(spent), "DoorDash-spending-"+fmt.Sprint(now.Year())+".csv") {
 			t.Errorf("the owner must also get the per-order file:\n%s", spent)
