@@ -53,6 +53,8 @@ var (
 	ddDay   = regexp.MustCompile(`^(?:(?:Today|Yesterday|Mon|Tue|Wed|Thu|Fri|Sat|Sun),? )?([A-Z][a-z]{2}) (\d{1,2})(?:, (\d{4}))?$`)
 	ddPrice = regexp.MustCompile(`^(-?\$[\d,]+\.\d{2}) • \d+ items?\b`)
 	ddFull  = regexp.MustCompile(`[A-Z][a-z]+day, ([A-Z][a-z]+ \d{1,2}, \d{4}) at (\d{1,2}:\d{2} [AP]M)`)
+	// Some order pages (gift cards) give the day without a year; the payment line has it in full.
+	ddPaid = regexp.MustCompile(`· (\d{1,2}/\d{1,2}/\d{4}) · (\d{1,2}:\d{2} [AP]M)`)
 )
 
 // ddParse reads the order list as it is on screen: newest first, a date line
@@ -161,9 +163,15 @@ func ddFetch(ctx context.Context, p *page.Page, url string) (time.Time, string, 
 		if s, err = p.Snapshot(ctx); err != nil {
 			return when, "", nil, err
 		}
-		if m := ddFull.FindStringSubmatch(s.Text); m != nil && strings.Contains(s.Text, "Total") {
-			when, _ = time.ParseInLocation("January 2, 2006 3:04 PM", m[1]+" "+m[2], time.Local)
-			break
+		if strings.Contains(s.Text, "Total") {
+			if m := ddFull.FindStringSubmatch(s.Text); m != nil {
+				when, _ = time.ParseInLocation("January 2, 2006 3:04 PM", m[1]+" "+m[2], time.Local)
+			} else if m := ddPaid.FindStringSubmatch(s.Text); m != nil {
+				when, _ = time.ParseInLocation("1/2/2006 3:04 PM", m[1]+" "+m[2], time.Local)
+			}
+			if !when.IsZero() {
+				break
+			}
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			return when, "", nil, errors.New("the order page did not load")
@@ -171,7 +179,7 @@ func ddFetch(ctx context.Context, p *page.Page, url string) (time.Time, string, 
 	}
 	// Leave out the site's menu and what follows the receipt.
 	text := s.Text
-	if i := strings.Index(text, "Order "); i > 0 {
+	if i := strings.Index(text, "Order "); i > 0 && i < 400 {
 		text = text[i:]
 	}
 	if i := strings.Index(text, "Create a business profile"); i > 0 {
@@ -259,8 +267,8 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 			continue
 		}
 		hit := true
-		for _, w := range words {
-			hit = hit && strings.Contains(strings.ToLower(o.Store), w)
+		for _, w := range words { // a store name, and a total to tell apart two orders from one store
+			hit = hit && strings.Contains(strings.ToLower(o.Store+" "+o.Total), w)
 		}
 		if hit {
 			match = append(match, o)
@@ -274,10 +282,10 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 		}
 		fmt.Fprintf(a.out, "Verdict: NOT FOUND. DoorDash's order history has no order %s. For the dates that exist run: novee-browse doordash-receipts %d\n", what, year)
 		return exitOK, nil
-	case !day.IsZero() && len(match) > 1:
-		fmt.Fprintf(a.out, "Verdict: %d DoorDash orders on %s. Ask Chinmay which one, or add the store name to the command:\n", len(match), day.Format("01/02/2006"))
+	case !day.IsZero() && len(match) > 1 && (match[0].String() != match[1].String() || len(words) == 0):
+		fmt.Fprintf(a.out, "Verdict: %d DoorDash orders on %s. Ask Chinmay which one, or use the command for the one he means:\n", len(match), day.Format("01/02/2006"))
 		for _, o := range match {
-			fmt.Fprintf(a.out, "- %s -> novee-browse doordash-receipt %s %s\n", o, day.Format("01/02/2006"), o.Store)
+			fmt.Fprintf(a.out, "- %s -> novee-browse doordash-receipt %s %s %s\n", o, day.Format("01/02/2006"), o.Store, o.Total)
 		}
 		return exitOK, nil
 	}
@@ -345,29 +353,38 @@ func (a *app) runDoordashJob(ctx context.Context, job *yearJob, want map[int]boo
 	var docs []doc
 	failed := 0
 	_, err = a.withPage(func(p *page.Page) (int, error) {
-		for i, o := range todo {
-			if ctx.Err() != nil {
-				return exitError, ctx.Err()
+		// A page that did not load the first time usually does the second: two rounds.
+		for round := 1; round <= 2 && len(todo) > 0; round++ {
+			var again []ddOrder
+			for i, o := range todo {
+				if ctx.Err() != nil {
+					return exitError, ctx.Err()
+				}
+				job.Phase = fmt.Sprintf("order %d of %d", i+1, len(todo))
+				if round > 1 {
+					job.Phase += " (second try)"
+				}
+				job.save()
+				session.Touch()
+				when, _, data, err := ddFetch(ctx, p, o.URL)
+				if err != nil {
+					fmt.Fprintf(a.out, "round %d: could not fetch %s: %v\n", round, o, err)
+					again = append(again, o)
+					continue
+				}
+				if want != nil && !want[when.Year()] { // the list's year was a guess; the order page knows
+					continue
+				}
+				path := filepath.Join(work, fmt.Sprintf("D-%s-%d-%d.pdf", when.Format("20060102-1504"), round, i))
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					return exitError, err
+				}
+				docs = append(docs, doc{When: when, Path: path, Kind: "order"})
+				job.Fetched = len(docs)
 			}
-			job.Phase = fmt.Sprintf("order %d of %d", i+1, len(todo))
-			job.save()
-			session.Touch()
-			when, _, data, err := ddFetch(ctx, p, o.URL)
-			if err != nil {
-				fmt.Fprintf(a.out, "could not fetch %s: %v\n", o, err)
-				failed++
-				continue
-			}
-			if want != nil && !want[when.Year()] { // the list's year was a guess; the order page knows
-				continue
-			}
-			path := filepath.Join(work, fmt.Sprintf("D-%s-%d.pdf", when.Format("20060102-1504"), i))
-			if err := os.WriteFile(path, data, 0o600); err != nil {
-				return exitError, err
-			}
-			docs = append(docs, doc{When: when, Path: path, Kind: "order"})
-			job.Fetched = len(docs)
+			todo = again
 		}
+		failed = len(todo)
 		return exitOK, nil
 	})
 	if err != nil {
