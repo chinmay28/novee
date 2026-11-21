@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -25,6 +26,9 @@ func TestMain(m *testing.M) {
 	}
 	if len(os.Args) == 3 && os.Args[1] == "_viewer" {
 		os.Exit(viewerMain(os.Args[2]))
+	}
+	if len(os.Args) == 3 && os.Args[1] == "_costcojob" {
+		os.Exit(costcoJobMain(os.Args[2]))
 	}
 	os.Exit(m.Run())
 }
@@ -45,7 +49,7 @@ const shop = `<html><head><title>Test Shop</title></head><body><main>
 // period drop-down named by the year a period ends in, two receipts per page,
 // and a receipt that opens in a pop-up.
 const fakeCostco = `<html><head><title>Orders & Purchases | Costco</title></head><body><main>
-<button>Online</button><button onclick="tab = true; draw()">Warehouse</button>
+<button onclick="tab = false; draw()">Online</button><button onclick="tab = true; draw()">Warehouse</button>
 <label>Showing <select id="period" aria-label="Showing" onchange="pg = 0; draw()">
 <option>Last 3 Months</option><option>2026 June - August</option><option>2026 December - February</option>
 <option>2025 September - November</option><option>2025 June - August</option></select></label>
@@ -64,12 +68,20 @@ const data = {
 };
 function draw() {
   const list = document.getElementById('list');
-  if (!tab) { list.innerText = 'Online order 1'; return; }
+  const m = location.hash.match(/orderdetails\/(\d+)/);
+  if (m) { list.innerHTML = '<h1>Order Details</h1><p>Order Number ' + m[1] + '</p><p>Order Summary</p><p>Total $59.98</p>'; return; }
+  if (!tab) {
+    list.innerHTML = (online[document.getElementById('period').value] || []).map(o => '<div class="card">Online Order Number ' + o[0] +
+      ' <span>Order Number</span> <span>' + o[0] + '</span> <span>' + o[1] + '</span> <b>Total</b> ' + o[2] + ' <a href="#x">View Order Details</a></div>').join('') || 'No orders';
+    return;
+  }
   const all = data[document.getElementById('period').value], rows = all.slice(pg * 2, pg * 2 + 2);
   list.innerHTML = rows.map((r, i) => '<div class="card"><b>In-Warehouse</b> <span>' + r[0] + '</span> <span>' + r[1] +
     '</span> <b>Total</b> ' + r[2] + ' <button onclick="show(' + (pg * 2 + i) + ')">View Receipt</button></div>').join('') +
     (all.length > (pg + 1) * 2 ? '<button aria-label="Go to next page" onclick="pg++; draw()">&gt;</button>' : '');
 }
+const online = {'2025 September - November': [['777001', '10/10/2025', '$59.98']], '2026 June - August': [['777002', '07/01/2026', '$5.00']]};
+addEventListener('hashchange', draw);
 function show(i) {
   const r = data[document.getElementById('period').value][i];
   document.getElementById('body').innerText = r[1] + ' #470 CHERRIES 9.99 TOTAL ' + r[2] + ' ' + r[0];
@@ -126,7 +138,7 @@ func TestBrowseEndToEnd(t *testing.T) {
 	t.Setenv("NOVEE_BROWSER_DIR", t.TempDir())
 
 	out := &bytes.Buffer{}
-	a := &app{out: out, keeper: []string{os.Args[0], "_keeper"}, viewer: []string{os.Args[0], "_viewer"}}
+	a := &app{out: out, keeper: []string{os.Args[0], "_keeper"}, viewer: []string{os.Args[0], "_viewer"}, job: []string{os.Args[0], "_costcojob"}}
 	run := func(args ...string) (int, string) {
 		t.Helper()
 		out.Reset()
@@ -228,7 +240,7 @@ func TestBrowseEndToEnd(t *testing.T) {
 	}
 
 	// The Costco receipt commands do the clicking themselves: tab, period, page, pop-up, PDF.
-	t.Setenv("NOVEE_COSTCO_URL", srv.URL+"/costco")
+	t.Setenv("NOVEE_COSTCO_URL", srv.URL+"/costco#/app/x/ordersandpurchases")
 	gotFile := filepath.Join(t.TempDir(), "got")
 	sendFile := filepath.Join(t.TempDir(), "send")
 	if err := os.WriteFile(sendFile, []byte("#!/bin/sh\nprintf '%s|' \"$1\" > "+gotFile+"; head -c 5 \"$2\" >> "+gotFile+"\n"), 0o700); err != nil {
@@ -253,6 +265,45 @@ func TestBrowseEndToEnd(t *testing.T) {
 		"- 12/21/2025 02:32pm, SAN JOSE, total $77.92", "- 11/30/2025 09:00am, ALMADEN, total $20.00")
 	if strings.Contains(got, "2026,") || strings.Contains(got, "/2026 ") {
 		t.Errorf("receipts of another year must not be listed:\n%s", got)
+	}
+	// One PDF per calendar year, made by a background job that sends it itself.
+	if _, err := exec.LookPath("gs"); err == nil {
+		sentLog := filepath.Join(t.TempDir(), "sentlog")
+		if err := os.WriteFile(sendFile, []byte("#!/bin/sh\necho \"$1|$2\" >> "+sentLog+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		code, got = run("costco-year-pdf", "2025")
+		if code != exitOK {
+			t.Fatalf("costco-year-pdf: %d %s", code, got)
+		}
+		wants(got, "STARTED a background job for 2025", "ONE PDF per calendar year")
+		if code, got = run("snapshot"); code != exitError || !strings.Contains(got, "BUSY: a Costco PDF job") {
+			t.Errorf("while the job runs, other commands must leave the browser alone: %d %s", code, got)
+		}
+		_, got = run("costco-year-pdf", "2025")
+		wants(got, "ALREADY RUNNING")
+		for i := 0; i < 240; i++ {
+			if _, ok := currentJob(); !ok {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if _, ok := currentJob(); ok {
+			t.Fatal("the job did not finish")
+		}
+		log, _ := os.ReadFile(sentLog)
+		joblog, _ := os.ReadFile(filepath.Join(os.Getenv("NOVEE_BROWSE_DIR"), "costco-job.log"))
+		m := regexp.MustCompile(`(?m)^Costco 2025: 3 warehouse receipts and 1 online orders, 10/10/2025 to 12/27/2025, oldest first\.\|(.+\.pdf)$`).FindStringSubmatch(string(log))
+		if m == nil || strings.Count(string(log), ".pdf") != 1 {
+			t.Fatalf("the owner must get exactly one PDF, for 2025:\n%s\njob log:\n%s", log, joblog)
+		}
+		if data, err := os.ReadFile(m[1]); err != nil || !bytes.HasPrefix(data, []byte("%PDF-")) {
+			t.Errorf("the year PDF: %v", err)
+		} else if n := len(regexp.MustCompile(`/Type\s*/Page[^s]`).FindAll(data, -1)); n != 4 {
+			t.Errorf("the year PDF must have one page per receipt (4), has %d", n)
+		}
+		_, got = run("costco-year-pdf", "status")
+		wants(got, "No Costco PDF job is running")
 	}
 	os.Unsetenv("NOVEE_BROWSE_NOTIFY_CMD")
 

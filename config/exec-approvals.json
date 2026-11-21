@@ -250,11 +250,11 @@
     },
     {
      "pattern": "novee-browse",
-     "argPattern": "^(?!.*--yes)(open|snapshot|read|find|scroll|back|click|type|select|screenshot|pdf|status|close|login-request|costco-receipts?)( .*)?$"
+     "argPattern": "^(?!.*--yes)(open|snapshot|read|find|scroll|back|click|type|select|screenshot|pdf|status|close|login-request|costco-receipts?|costco-year-pdf)( .*)?$"
     },
     {
      "pattern": "/home/chinmay/.local/bin/novee-browse",
-     "argPattern": "^(?!.*--yes)(open|snapshot|read|find|scroll|back|click|type|select|screenshot|pdf|status|close|login-request|costco-receipts?)( .*)?$"
+     "argPattern": "^(?!.*--yes)(open|snapshot|read|find|scroll|back|click|type|select|screenshot|pdf|status|close|login-request|costco-receipts?|costco-year-pdf)( .*)?$"
     },
     {
      "pattern": "openclaw",

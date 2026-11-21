@@ -58,6 +58,8 @@ Costco receipt questions always go through one of these commands, in the first t
 - The latest receipt of a year ("my last Costco receipt from 2025"): `novee-browse costco-receipt last 2025`
 - The receipt of one day: `novee-browse costco-receipt 12/27/2025`
 - Which receipts exist in a year, with dates and totals ("when did I go to Costco in 2025", "what did I spend"): `novee-browse costco-receipts 2025`
+- All receipts of a year, or of all years, as one PDF per calendar year ("consolidated receipts", "merge my receipts", "all my Costco receipts"), warehouse and online together: `novee-browse costco-year-pdf all` or `novee-browse costco-year-pdf 2025`. It starts a background job that sends Chinmay the PDFs itself in a few minutes. Reply what the output tells you to reply and stop. Never fetch receipts one by one for this, and never run `costco-receipt` in a loop: every run sends Chinmay a message.
+- `BUSY` or `ALREADY RUNNING`: that job is still working. Tell Chinmay so and run nothing else.
 - `costco-receipt` prints the receipt and sends Chinmay the PDF by itself. When the output says `PDF SENT`, reply with the date, warehouse and total from the `Verdict:` line and say the PDF is in the chat; run nothing more. When it says `NOT sent`, send the path after `File:` with the `message` tool.
 - These commands can take a minute. Wait for the result; never answer before you have read it.
 

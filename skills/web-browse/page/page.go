@@ -246,37 +246,63 @@ func (p *Page) Screenshot(ctx context.Context) ([]byte, error) {
 	return png, p.run(ctx, chromedp.CaptureScreenshot(&png))
 }
 
-// printOnlyDialog makes the open pop-up, if any, the only thing that prints,
-// at its full length. It returns whether there was one.
-const printOnlyDialog = `(() => {` + describe + `
-  const d = __dialog(); if (!d) return false;
+// printOnly makes one part of the page the only thing that prints, at its
+// full length: the open pop-up if there is one, else (when content is set)
+// the block that holds the page's own content without the site's header,
+// menus and footer. It returns which it found: "dialog", "content" or "".
+func printOnly(content bool) string {
+	return `(() => {` + describe + `
+  let kind = 'dialog', d = __dialog();
+  if (!d && ` + fmt.Sprint(content) + `) {
+    kind = 'content';
+    d = document.querySelector('main, [role=main]');
+    if (!d) { // no landmark: the smallest block that holds the page's main heading and most of its text
+      const h = document.querySelector('h1');
+      for (d = h; d && d.parentElement && d.parentElement !== document.body && (d.innerText || '').length < 400; d = d.parentElement);
+    }
+  }
+  if (!d || d === document.body) return '';
   d.setAttribute('data-novee-print', '');
-  for (let a = d.parentElement; a && a !== document.documentElement; a = a.parentElement) a.setAttribute('data-novee-print-up', '');
+  for (let a = d; a.parentElement && a !== document.body; a = a.parentElement) {
+    if (a !== d) a.setAttribute('data-novee-print-up', '');
+    for (const sib of a.parentElement.children)
+      if (sib !== a && !['SCRIPT', 'STYLE', 'LINK'].includes(sib.tagName)) sib.setAttribute('data-novee-print-hide', '');
+  }
   const st = document.createElement('style'); st.id = 'novee-print';
   st.textContent = '@media print {' +
-    'body * { visibility: hidden !important; }' +
-    '[data-novee-print], [data-novee-print] * { visibility: visible !important; max-height: none !important; overflow: visible !important; }' +
-    '[data-novee-print-up] { position: static !important; transform: none !important; overflow: visible !important; max-height: none !important; height: auto !important; }' +
-    '[data-novee-print] { position: absolute !important; left: 0 !important; top: 0 !important; margin: 0 !important; height: auto !important; transform: none !important; box-shadow: none !important; }' +
+    '[data-novee-print-hide] { display: none !important; }' +
+    '[data-novee-print-up] { display: block !important; position: static !important; transform: none !important; overflow: visible !important; max-height: none !important; height: auto !important; min-height: 0 !important; margin: 0 !important; padding: 0 !important; border: 0 !important; background: none !important; }' +
+    '[data-novee-print] { position: static !important; margin: 0 !important; height: auto !important; max-height: none !important; overflow: visible !important; transform: none !important; box-shadow: none !important; }' +
+    '[data-novee-print] * { max-height: none !important; overflow: visible !important; }' +
+    'html, body { height: auto !important; min-height: 0 !important; overflow: visible !important; background: #fff !important; }' +
+    // A pop-up keeps the width it has on screen and loses its own Close and Print buttons.
+    (kind === 'dialog' ? '[data-novee-print] { width: ' + Math.round(d.getBoundingClientRect().width) + 'px !important; } [data-novee-print] button { display: none !important; }' : '') +
     '}';
   document.head.appendChild(st);
-  return true;
+  return kind;
 })()`
+}
 
 const printEverything = `(() => {
   const st = document.getElementById('novee-print'); if (st) st.remove();
-  document.querySelectorAll('[data-novee-print]').forEach(e => e.removeAttribute('data-novee-print'));
-  document.querySelectorAll('[data-novee-print-up]').forEach(e => e.removeAttribute('data-novee-print-up'));
+  for (const a of ['data-novee-print', 'data-novee-print-up', 'data-novee-print-hide'])
+    document.querySelectorAll('[' + a + ']').forEach(e => e.removeAttribute(a));
 })()`
 
 // PDF prints the page as the site lays it out for printing. When a pop-up is
 // open (a receipt, an invoice), it prints the pop-up alone.
-func (p *Page) PDF(ctx context.Context) ([]byte, error) {
-	var only bool
-	if err := p.eval(ctx, printOnlyDialog, &only); err != nil {
+func (p *Page) PDF(ctx context.Context) ([]byte, error) { return p.pdf(ctx, false) }
+
+// ContentPDF prints the open pop-up, or else the page's own content without
+// the site's header, menus and footer.
+func (p *Page) ContentPDF(ctx context.Context) ([]byte, error) { return p.pdf(ctx, true) }
+
+func (p *Page) pdf(ctx context.Context, content bool) ([]byte, error) {
+	var only string
+	if err := p.eval(ctx, printOnly(content), &only); err != nil {
 		return nil, err
 	}
-	if only {
+	if only != "" {
 		defer p.eval(context.WithoutCancel(ctx), printEverything, nil)
 	}
 	var pdf []byte
@@ -286,6 +312,19 @@ func (p *Page) PDF(ctx context.Context) ([]byte, error) {
 		return err
 	}))
 	return pdf, err
+}
+
+// Hash changes the part of the address after "#" the way a link inside a
+// one-page site does: from, a pattern, is replaced by to. It returns false
+// when the address has no such part.
+func (p *Page) Hash(ctx context.Context, from, to string) (bool, error) {
+	var ok bool
+	err := p.eval(ctx, fmt.Sprintf(`(() => { const re = new RegExp(%q); if (!re.test(location.hash)) return false;
+  location.hash = location.hash.replace(re, %q); return true; })()`, from, to), &ok)
+	if err == nil && ok {
+		p.settle(ctx)
+	}
+	return ok, err
 }
 
 // The rest lets a person operate the tab from a picture of it: the sign-in

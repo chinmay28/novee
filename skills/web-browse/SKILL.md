@@ -85,11 +85,16 @@ Do not click through Costco's receipt pages yourself. These commands do it:
 - `novee-browse costco-receipt 12/27/2025`: the receipt of that day.
 - `novee-browse costco-receipts 2025`: every warehouse receipt of the year, with date, warehouse and total.
 
+- `novee-browse costco-year-pdf all` (or `costco-year-pdf 2025`, or `costco-year-pdf 2024 2025`): ONE PDF per calendar year holding every original receipt of that year, warehouse receipts and online orders, oldest first. Use it for "consolidated receipts", "all my receipts", "merge the receipts by year". It starts a background job (about 5 minutes per year) that sends Chinmay the finished PDFs itself; nothing else is sent. `costco-year-pdf status` says how far it is, `costco-year-pdf stop` ends it.
+
+Never loop over `costco-receipt` to collect many receipts: each run sends Chinmay a message. That is what `costco-year-pdf` is for.
+
 `costco-receipt` prints the receipt text and sends Chinmay the PDF itself. How to answer:
 
 - `Verdict: FOUND` and `PDF SENT`: tell Chinmay the date, warehouse and total from the Verdict line and that the PDF is in the chat. Run nothing more.
 - `NOT sent` with `File:`: send that file with the `message` tool.
 - `Verdict: NOT FOUND`: say so, and offer the list (`costco-receipts YEAR`).
+- `STARTED a background job`: reply what the output says and stop. `BUSY` or `ALREADY RUNNING`: the job is still working; say so and run nothing else until Chinmay asks.
 - `SIGN-IN LINK SENT`: Costco is not signed in; see the rule below. When Chinmay says he is done, run the same costco command again.
 - For "did I buy X" or "how much was X", get the receipts with these commands and read the item lines; receipt names are abbreviated (KS = Kirkland Signature).
 
