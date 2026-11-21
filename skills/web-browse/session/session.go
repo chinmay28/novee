@@ -9,6 +9,7 @@
 package session
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -73,11 +74,12 @@ func virtualScreen() (*exec.Cmd, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
+	// Xvfb writes the number and then a newline, and dies if the pipe is closed
+	// in between: read the whole line before letting go of it.
 	_ = r.SetReadDeadline(time.Now().Add(10 * time.Second))
-	buf := make([]byte, 16)
-	n, _ := r.Read(buf) // Xvfb writes the number and a newline once it is ready
-	num := strings.TrimSpace(string(buf[:n]))
-	if _, err := strconv.Atoi(num); err != nil {
+	line, _ := bufio.NewReader(r).ReadString('\n')
+	num := strings.TrimSpace(line)
+	if _, err := strconv.Atoi(num); err != nil || !strings.HasSuffix(line, "\n") {
 		_ = x.Process.Kill()
 		return nil, "", errors.New("the virtual screen (Xvfb) did not start")
 	}

@@ -93,18 +93,16 @@ type server struct {
 	mu    sync.Mutex // one browser command at a time
 	port  int        // the browser's debugging port
 	pg    *page.Page
+	id    string // the tab pg is attached to
 	info  Info
 	done  chan struct{}
 	close sync.Once
 	w, h  int // the size the page was last laid out for, if the owner's screen is small
 }
 
-// tab returns the attached tab, attaching again if the page was replaced.
+// tab returns the attached tab. It follows the browser to a new tab or
+// window: "Continue with Google" and the like open the sign-in in one.
 func (s *server) tab() (*page.Page, error) {
-	if s.pg != nil {
-		return s.pg, nil
-	}
-	s.w, s.h = 0, 0
 	in, ok := session.Current()
 	if !ok {
 		return nil, errors.New("the browser is closed")
@@ -113,7 +111,12 @@ func (s *server) tab() (*page.Page, error) {
 	if err != nil {
 		return nil, err
 	}
+	if s.pg != nil && id == s.id {
+		return s.pg, nil
+	}
+	s.w, s.h = 0, 0
 	s.pg, err = page.Attach(in.Port, id)
+	s.id = id
 	return s.pg, err
 }
 
