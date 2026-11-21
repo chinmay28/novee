@@ -41,6 +41,7 @@ Act:
   type N TEXT [--enter] [--yes]   replace the content of text field N
   select N TEXT         choose an option of drop-down list N
 Keep:
+  download N            click a Download button or link and keep the file; prints its path
   screenshot            save a picture of the screen; prints the file path
   pdf                   save the page as the site prints it; prints the file path
 Session:
@@ -54,6 +55,10 @@ Costco receipts (does the clicking itself; needs Chinmay signed in):
   costco-year-pdf all | YEAR   ONE PDF per calendar year with every original receipt
                                (warehouse and online), sent to Chinmay when ready;
                                runs in the background. Also: status, stop
+DoorDash receipts (the same three, for DoorDash orders):
+  doordash-receipt last [YEAR] | MM/DD/YYYY [STORE]
+  doordash-receipts [YEAR]
+  doordash-year-pdf all | YEAR
 Sign-in (Novee never types a password):
   login-request         send Chinmay a link to this browser so he signs in himself,
                         from his phone or PC. Done automatically when a page asks
@@ -121,20 +126,22 @@ func (a *app) run(args []string) int {
 		"open": a.open, "snapshot": a.snapshot, "read": a.read, "find": a.find, "scroll": a.scroll, "back": a.back,
 		"click": a.click, "type": a.typeText, "select": a.selectOption, "screenshot": a.screenshot, "pdf": a.pdf,
 		"status": a.status, "close": a.closeSession, "login": a.login, "login-request": a.loginRequest,
+		"download":       a.download,
 		"costco-receipt": a.costcoReceipt, "costco-receipts": a.costcoReceipts, "costco-year-pdf": a.costcoYearPDF,
+		"doordash-receipt": a.doordashReceipt, "doordash-receipts": a.doordashReceipts, "doordash-year-pdf": a.doordashYearPDF,
 	}
 	cmd, ok := cmds[args[0]]
 	if !ok {
 		fmt.Fprintf(a.out, "ERROR: unknown command %q. Run novee-browse without arguments for the list.\n", args[0])
 		return exitError
 	}
-	if job, ok := currentJob(); ok && args[0] != "status" && args[0] != "costco-year-pdf" {
+	if job, ok := currentJob(); ok && args[0] != "status" && !strings.HasSuffix(args[0], "-year-pdf") {
 		// The job is clicking through the same page.
-		fmt.Fprintf(a.out, "BUSY: a Costco PDF job is using the browser (%s). Chinmay gets its PDFs in the chat when it is done. Do not run browser commands until then; to check: novee-browse costco-year-pdf status\n", job.describe())
+		fmt.Fprintf(a.out, "BUSY: a receipts PDF job is using the browser (%s). Chinmay gets its PDFs in the chat when it is done. Do not run browser commands until then; to check: novee-browse %s-year-pdf status\n", job.describe(), job.Store)
 		return exitError
 	}
 	limit := 90 * time.Second
-	if strings.HasPrefix(args[0], "costco-") { // several pages are clicked through
+	if strings.HasPrefix(args[0], "costco-") || strings.HasPrefix(args[0], "doordash-") { // several pages are clicked through
 		limit = 4 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
@@ -586,6 +593,36 @@ func (a *app) save(kind, ext string, data []byte) (int, error) {
 	}
 	fmt.Fprintf(a.out, "Saved, %d KB. Send it to Chinmay with the message tool.\nFile: %s\n", (len(data)+1023)/1024, path)
 	return exitOK, nil
+}
+
+// download clicks a "Download" button or link and keeps the file.
+func (a *app) download(ctx context.Context, args []string) (int, error) {
+	if len(args) != 1 {
+		return exitError, errors.New("usage: download N (the number of a Download button or link)")
+	}
+	n, err := ref(args[0])
+	if err != nil {
+		return exitError, err
+	}
+	return a.withPage(func(p *page.Page) (int, error) {
+		e, err := p.Element(ctx, n)
+		if err != nil {
+			return exitError, err
+		}
+		if d, why := guard.Click(e); d != guard.Allow {
+			return a.allowed(d, why, false, ""), nil
+		}
+		path, err := p.Download(ctx, n, filepath.Join(outDir(), "downloads"))
+		if errors.Is(err, page.ErrPrints) {
+			fmt.Fprintln(a.out, "That button only prints the page. Saving the page the same way instead.")
+			return a.pdf(ctx, nil)
+		}
+		if err != nil {
+			return exitError, err
+		}
+		fmt.Fprintf(a.out, "Downloaded. Send it to Chinmay with the message tool.\nFile: %s\n", path)
+		return exitOK, nil
+	})
 }
 
 func (a *app) screenshot(ctx context.Context, _ []string) (int, error) {

@@ -56,6 +56,7 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 - `click N`: click element N.
 - `type N TEXT`: replace the content of text field N, for example `type 11 batteries --enter`. `--enter` presses Enter (for search boxes).
 - `select N TEXT`: choose an option in drop-down list N, for example `select 48 Last 3 Months`.
+- `download N`: click a Download button or link and keep the file; the output has `File: PATH`.
 - `screenshot`, `pdf`: save what is shown; the output has `File: PATH`. Send that file with the `message` tool.
 - `login-request`: send Chinmay a new link to this browser so he signs in himself. No arguments. The first link is sent automatically when a page asks for a password.
 - `status`, `close`: is a browser open; close it when the task is finished.
@@ -97,6 +98,15 @@ Never loop over `costco-receipt` to collect many receipts: each run sends Chinma
 - `STARTED a background job`: reply what the output says and stop. `BUSY` or `ALREADY RUNNING`: the job is still working; say so and run nothing else until Chinmay asks.
 - `SIGN-IN LINK SENT`: Costco is not signed in; see the rule below. When Chinmay says he is done, run the same costco command again.
 - For "did I buy X" or "how much was X", get the receipts with these commands and read the item lines; receipt names are abbreviated (KS = Kirkland Signature).
+
+## DoorDash receipts: the same, with `doordash`
+
+- `novee-browse doordash-receipt last` (or `last 2025`): the newest order, its receipt text, and the PDF sent to Chinmay.
+- `novee-browse doordash-receipt 11/15/2026`: the order of that day. If there were several, the output lists them with the exact command for each; ask Chinmay which, or add the store name: `novee-browse doordash-receipt 11/15/2026 mehak`.
+- `novee-browse doordash-receipts 2026`: every order of the year with date, store and total.
+- `novee-browse doordash-year-pdf all` (or a year): one PDF per calendar year with every receipt, made by a background job that sends the files itself. About 15 minutes per year.
+
+The answers read the same as Costco's (`Verdict:`, `PDF SENT`, `NOT sent`, `STARTED`, `BUSY`, `SIGN-IN LINK SENT`). A total of `$0.00` in the list is what DoorDash shows for an order paid together with another one; the receipt has the real amounts.
 
 ## Examples
 

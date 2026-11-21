@@ -183,7 +183,8 @@ func PageTarget(in *Info) (string, error) {
 		return "", err
 	}
 	for _, t := range ts {
-		if t.Type == "page" && !strings.HasPrefix(t.URL, "devtools://") {
+		// Not the browser's own windows (developer tools, a print dialog).
+		if t.Type == "page" && !strings.HasPrefix(t.URL, "devtools://") && !strings.HasPrefix(t.URL, "chrome://") {
 			return t.ID, nil
 		}
 	}

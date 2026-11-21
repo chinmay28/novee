@@ -86,13 +86,14 @@ func named(s page.Snapshot, kind, name string) (page.Element, bool) {
 	return page.Element{}, false
 }
 
-// costcoWarehouse opens the orders page and its Warehouse tab. When the site
-// is not signed in it prints the sign-in outcome instead and returns false.
-func (a *app) costcoWarehouse(ctx context.Context) (bool, int, error) {
+// signedIn opens a page of a site the owner has an account on. When the site
+// asks for a sign-in instead, it prints the outcome of the sign-in request
+// (the link was sent, or is already out) and returns false.
+func (a *app) signedIn(ctx context.Context, url, site string) (bool, int, error) {
 	real := a.out
 	buf := &bytes.Buffer{}
 	a.out = buf
-	code, err := a.open(ctx, []string{costcoURL()})
+	code, err := a.open(ctx, []string{url})
 	a.out = real
 	if err != nil || code != exitOK {
 		fmt.Fprint(real, buf.String())
@@ -104,11 +105,21 @@ func (a *app) costcoWarehouse(ctx context.Context) (bool, int, error) {
 			if mark == "NOT loaded again" {
 				i = 0
 			}
-			fmt.Fprint(real, "Costco is not signed in yet.\n"+out[i:])
+			fmt.Fprint(real, site+" is not signed in yet.\n"+out[i:])
 			return false, exitOK, nil
 		}
 	}
-	code, err = a.withPage(func(p *page.Page) (int, error) {
+	return true, exitOK, nil
+}
+
+// costcoWarehouse opens the orders page and its Warehouse tab. When the site
+// is not signed in it prints the sign-in outcome instead and returns false.
+func (a *app) costcoWarehouse(ctx context.Context) (bool, int, error) {
+	if ok, code, err := a.signedIn(ctx, costcoURL(), "Costco"); !ok {
+		return false, code, err
+	}
+	code, err := a.withPage(func(p *page.Page) (int, error) {
+		// The account page draws itself	code, err := a.withPage(func(p *page.Page) (int, error) {
 		// The account page draws itself after it has loaded: give the tab time to appear.
 		var tab page.Element
 		ok := false

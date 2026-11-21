@@ -63,6 +63,12 @@ Costco receipt questions always go through one of these commands, in the first t
 - `costco-receipt` prints the receipt and sends Chinmay the PDF by itself. When the output says `PDF SENT`, reply with the date, warehouse and total from the `Verdict:` line and say the PDF is in the chat; run nothing more. When it says `NOT sent`, send the path after `File:` with the `message` tool.
 - These commands can take a minute. Wait for the result; never answer before you have read it.
 
+DoorDash order and receipt questions work the same way, with `doordash` in place of `costco`:
+- The latest order ("my last DoorDash receipt"): `novee-browse doordash-receipt last` (or `last 2025`).
+- The order of one day: `novee-browse doordash-receipt 11/15/2026`. If the output lists several orders that day, ask Chinmay which store, or add the store: `novee-browse doordash-receipt 11/15/2026 mehak`.
+- Which orders exist in a year, with dates, stores and totals: `novee-browse doordash-receipts 2026`
+- All DoorDash receipts as one PDF per calendar year: `novee-browse doordash-year-pdf all` (or a year). A background job, like the Costco one; only one such job runs at a time.
+
 Other shop, order and account questions (online orders, another site Chinmay has an account on, a page that needs a sign-in) go through the same tool one step at a time.
 - First command, exactly: `novee-browse open URL`. `novee-browse` is a program, not a Python script.
 - Then one step per command (`novee-browse click 45`, `type 11 batteries --enter`, `select 48 Last 3 Months`, `scroll down`, `find WORDS`, `read`, `pdf`, `close`), always using the numbers from the latest output.

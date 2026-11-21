@@ -5,8 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/browser"
 	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/input"
 	cdppage "github.com/chromedp/cdproto/page"
@@ -18,6 +22,9 @@ import (
 
 // Page is an attached browser tab.
 type Page struct{ ctx context.Context }
+
+// ErrPrints means a download button only prints the page; PDF does the same.
+var ErrPrints = errors.New("this button prints the page instead of handing over a file")
 
 // ErrGone means the numbered element is no longer on the page.
 var ErrGone = errors.New("that element is not on the page any more")
@@ -350,11 +357,18 @@ func (p *Page) ClickAt(ctx context.Context, fx, fy float64) error {
 	return p.run(ctx, chromedp.MouseClickXY(fx*size.W, fy*size.H))
 }
 
-// Insert types text into whatever has the focus.
+// Insert types text into whatever has the focus, key by key as a keyboard
+// would: some sign-in forms reject text that arrives without key presses.
+// Characters no key produces are inserted as they are.
 func (p *Page) Insert(ctx context.Context, text string) error {
-	return p.run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
-		return input.InsertText(text).Do(ctx)
-	}))
+	for _, r := range text {
+		if r < 0x20 || r > 0x7e {
+			return p.run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+				return input.InsertText(text).Do(ctx)
+			}))
+		}
+	}
+	return p.run(ctx, chromedp.KeyEvent(text))
 }
 
 // Press presses one of the keys "Enter", "Tab" or "Backspace".
@@ -388,4 +402,52 @@ func (p *Page) Resize(ctx context.Context, w, h int) error {
 	return p.run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		return emulation.SetDeviceMetricsOverride(int64(w), int64(h), 2, false).Do(ctx)
 	}))
+}
+
+// Download clicks element ref and returns the file the site hands over, saved
+// in dir under the name the site gave it.
+func (p *Page) Download(ctx context.Context, ref int, dir string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	before := map[string]bool{}
+	old, _ := os.ReadDir(dir)
+	for _, f := range old {
+		before[f.Name()] = true
+	}
+	if err := p.run(ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		return browser.SetDownloadBehavior(browser.SetDownloadBehaviorBehaviorAllow).WithDownloadPath(dir).Do(ctx)
+	})); err != nil {
+		return "", err
+	}
+	// A "download" that is really the browser's print dialog would block the page: note it instead.
+	if err := p.eval(ctx, `window.print = () => { window.__noveePrint = true; }`, nil); err != nil {
+		return "", err
+	}
+	if err := p.Click(ctx, ref); err != nil {
+		return "", err
+	}
+	var printed bool
+	if p.eval(ctx, `!!window.__noveePrint`, &printed); printed {
+		return "", ErrPrints
+	}
+	// The file is complete when it has its final name and has stopped growing.
+	last, size := "", int64(-1)
+	for deadline := time.Now().Add(40 * time.Second); time.Now().Before(deadline) && ctx.Err() == nil; time.Sleep(500 * time.Millisecond) {
+		now, _ := os.ReadDir(dir)
+		for _, f := range now {
+			if before[f.Name()] || strings.HasSuffix(f.Name(), ".crdownload") || strings.HasPrefix(f.Name(), ".") {
+				continue
+			}
+			st, err := f.Info()
+			if err != nil || st.Size() == 0 {
+				continue
+			}
+			if f.Name() == last && st.Size() == size {
+				return filepath.Join(dir, f.Name()), nil
+			}
+			last, size = f.Name(), st.Size()
+		}
+	}
+	return "", errors.New("the site offered no file after the click")
 }

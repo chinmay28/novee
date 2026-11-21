@@ -113,6 +113,26 @@ if (!localStorage.getItem('seen')) document.getElementById('f').innerHTML = '<a 
 if (location.hash !== '#again') localStorage.setItem('seen', '1');</script>`)
 	})
 	mux.HandleFunc("/costco", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, fakeCostco) })
+	// An order history like DoorDash's: dates without a year, newest first, and a page per order.
+	ddNow, ddOld := time.Now(), time.Now().AddDate(-1, 1, 0)
+	mux.HandleFunc("/doordash", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `<title>Order History</title><main><h1>Orders</h1>
+<div><span>Today, %s</span><div><a href="/store/1">Mehak of India</a><div>$16.20 • 1 item • Personal</div><div>Dal Tadka</div><a href="/doordash/order/a1">View Receipt</a></div>
+<div><a href="/store/2">Chaat Cafe</a><div>$27.60 • 2 items • Personal</div><div>Saag</div><a href="/doordash/order/a2">View Receipt</a></div></div>
+<div><span>%s</span><div><a href="/store/3">Dunkin'</a><div>$18.90 • 2 items • Personal</div><div>Egg</div><a href="/doordash/order/b1">View Receipt</a></div></div>
+</main>`, ddNow.Format("Jan 2"), ddOld.Format("Jan 2"))
+	})
+	mux.HandleFunc("/doordash/order/", func(w http.ResponseWriter, r *http.Request) {
+		when, store, total := ddNow, "Mehak of India", "$16.20"
+		switch r.URL.Path[len("/doordash/order/"):] {
+		case "a2":
+			store, total = "Chaat Cafe", "$27.60"
+		case "b1":
+			when, store, total = ddOld, "Dunkin'", "$18.90"
+		}
+		fmt.Fprintf(w, `<title>Order</title><main><h1>Order Complete</h1><p>%s at 8:19 PM</p><p>%s</p><p>Subtotal $1.00</p><p>Total %s</p><button onclick="print()">Download receipt</button></main>`,
+			when.Format("Monday, January 2, 2006"), store, total)
+	})
 	mux.HandleFunc("/ordered", func(w http.ResponseWriter, r *http.Request) { ordered.Add(1) })
 	mux.HandleFunc("/note", func(w http.ResponseWriter, r *http.Request) {
 		noted.Add(1)
@@ -276,8 +296,8 @@ func TestBrowseEndToEnd(t *testing.T) {
 		if code != exitOK {
 			t.Fatalf("costco-year-pdf: %d %s", code, got)
 		}
-		wants(got, "STARTED a background job for 2025", "ONE PDF per calendar year")
-		if code, got = run("snapshot"); code != exitError || !strings.Contains(got, "BUSY: a Costco PDF job") {
+		wants(got, "STARTED a background job for Costco, 2025", "ONE PDF per calendar year")
+		if code, got = run("snapshot"); code != exitError || !strings.Contains(got, "BUSY: a receipts PDF job") {
 			t.Errorf("while the job runs, other commands must leave the browser alone: %d %s", code, got)
 		}
 		_, got = run("costco-year-pdf", "2025")
@@ -303,7 +323,46 @@ func TestBrowseEndToEnd(t *testing.T) {
 			t.Errorf("the year PDF must have one page per receipt (4), has %d", n)
 		}
 		_, got = run("costco-year-pdf", "status")
-		wants(got, "No Costco PDF job is running")
+		wants(got, "No receipts PDF job is running")
+	}
+	// DoorDash: the year of a list entry is worked out, the order page confirms it.
+	t.Setenv("NOVEE_DOORDASH_URL", srv.URL+"/doordash")
+	now, old := time.Now(), time.Now().AddDate(-1, 1, 0)
+	_, got = run("doordash-receipts", fmt.Sprint(old.Year()))
+	wants(got, "- "+old.Format("01/02/2006")+", Dunkin', total $18.90")
+	_, got = run("doordash-receipt", "last", "--no-send")
+	wants(got, "Verdict: FOUND. The last DoorDash order of "+fmt.Sprint(now.Year())+": the receipt of "+now.Format("01/02/2006")+" 08:19pm, Mehak of India, total $16.20.",
+		"Subtotal $1.00", "File: ")
+	_, got = run("doordash-receipt", now.Format("01/02/2006"))
+	wants(got, "Verdict: 2 DoorDash orders on "+now.Format("01/02/2006"), "novee-browse doordash-receipt "+now.Format("01/02/2006")+" Chaat Cafe")
+	_, got = run("doordash-receipt", now.Format("01/02/2006"), "chaat", "--no-send")
+	wants(got, "Chaat Cafe, total $27.60", "File: ")
+	// A "download" button that only prints is answered with the printed page.
+	_, got = run("snapshot")
+	_, got = run("download", num(got, "Download receipt"))
+	wants(got, "only prints the page", "File: ")
+	if _, err := exec.LookPath("gs"); err == nil {
+		sentLog := filepath.Join(t.TempDir(), "ddsent")
+		if err := os.WriteFile(sendFile, []byte("#!/bin/sh\necho \"$1|$2\" >> "+sentLog+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		_, got = run("doordash-year-pdf", "all")
+		wants(got, "STARTED a background job for DoorDash, all years", "novee-browse doordash-year-pdf status")
+		for i := 0; i < 240; i++ {
+			if _, ok := currentJob(); !ok {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		log, _ := os.ReadFile(sentLog)
+		for y, n := range map[int]int{now.Year(): 2, old.Year(): 1} {
+			if now.Year() == old.Year() {
+				n = 3
+			}
+			if !strings.Contains(string(log), fmt.Sprintf("DoorDash %d: %d orders, ", y, n)) {
+				t.Errorf("the owner must get a DoorDash PDF for %d with %d orders:\n%s", y, n, log)
+			}
+		}
 	}
 	os.Unsetenv("NOVEE_BROWSE_NOTIFY_CMD")
 

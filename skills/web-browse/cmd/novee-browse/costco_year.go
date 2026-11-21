@@ -30,6 +30,7 @@ import (
 // commands leave the browser alone.
 
 type yearJob struct {
+	Store   string    `json:"store"` // "costco" or "doordash"
 	Pid     int       `json:"pid"`
 	Started time.Time `json:"started"`
 	Years   string    `json:"years"` // "all" or "2024,2025"
@@ -57,8 +58,8 @@ func (j *yearJob) save() {
 }
 
 func (j *yearJob) describe() string {
-	return fmt.Sprintf("started %d minutes ago for %s; now: %s; %d receipts fetched so far",
-		int(time.Since(j.Started).Minutes()), j.Years, j.Phase, j.Fetched)
+	return fmt.Sprintf("%s, started %d minutes ago for %s; now: %s; %d receipts fetched so far",
+		storeName[j.Store], int(time.Since(j.Started).Minutes()), j.Years, j.Phase, j.Fetched)
 }
 
 // parseYears turns "all" or a list of years into a filter; nil means every year.
@@ -86,9 +87,20 @@ func parseYears(args []string) (map[int]bool, string, error) {
 	return want, strings.Join(names, ","), nil
 }
 
-// costcoYearPDF starts, shows or stops the job.
+var storeName = map[string]string{"costco": "Costco", "doordash": "DoorDash"}
+
 func (a *app) costcoYearPDF(ctx context.Context, args []string) (int, error) {
-	const usage = "usage: costco-year-pdf all | YEAR [YEAR ...] | status | stop. Examples: costco-year-pdf all, costco-year-pdf 2025"
+	return a.yearPDF(ctx, "costco", args)
+}
+
+func (a *app) doordashYearPDF(ctx context.Context, args []string) (int, error) {
+	return a.yearPDF(ctx, "doordash", args)
+}
+
+// yearPDF starts, shows or stops the job of a store.
+func (a *app) yearPDF(ctx context.Context, store string, args []string) (int, error) {
+	name, cmd := storeName[store], store+"-year-pdf"
+	usage := fmt.Sprintf("usage: %s all | YEAR [YEAR ...] | status | stop. Examples: %s all, %s 2025", cmd, cmd, cmd)
 	if len(args) == 0 {
 		return exitError, errors.New(usage)
 	}
@@ -96,19 +108,19 @@ func (a *app) costcoYearPDF(ctx context.Context, args []string) (int, error) {
 	switch args[0] {
 	case "status":
 		if !running {
-			fmt.Fprintln(a.out, "No Costco PDF job is running. The last one has finished; its PDFs were sent to Chinmay if it found receipts.")
+			fmt.Fprintln(a.out, "No receipts PDF job is running. The last one has finished; its PDFs were sent to Chinmay if it found receipts.")
 			return exitOK, nil
 		}
-		fmt.Fprintf(a.out, "A Costco PDF job is RUNNING: %s. Chinmay gets the PDFs in the chat when it is done. Run nothing more.\n", job.describe())
+		fmt.Fprintf(a.out, "A receipts PDF job is RUNNING: %s. Chinmay gets the PDFs in the chat when it is done. Run nothing more.\n", job.describe())
 		return exitOK, nil
 	case "stop":
 		if !running {
-			fmt.Fprintln(a.out, "No Costco PDF job was running.")
+			fmt.Fprintln(a.out, "No receipts PDF job was running.")
 			return exitOK, nil
 		}
 		_ = syscall.Kill(job.Pid, syscall.SIGTERM)
 		_ = os.Remove(jobFile())
-		fmt.Fprintln(a.out, "The Costco PDF job was stopped. Nothing was sent.")
+		fmt.Fprintln(a.out, "The receipts PDF job was stopped. Nothing was sent.")
 		return exitOK, nil
 	}
 	_, names, err := parseYears(args)
@@ -116,24 +128,28 @@ func (a *app) costcoYearPDF(ctx context.Context, args []string) (int, error) {
 		return exitError, fmt.Errorf("%w. %s", err, usage)
 	}
 	if running {
-		fmt.Fprintf(a.out, "A Costco PDF job is ALREADY RUNNING: %s. Do not start another. Tell Chinmay it is still working and that the PDFs will arrive in the chat.\n", job.describe())
+		fmt.Fprintf(a.out, "A receipts PDF job is ALREADY RUNNING: %s. Only one runs at a time; do not start another. Tell Chinmay it is still working and that the PDFs will arrive in the chat.\n", job.describe())
 		return exitOK, nil
 	}
 	if _, err := exec.LookPath("gs"); err != nil {
 		return exitError, errors.New("Ghostscript is needed to join PDFs and is not installed (sudo apt install ghostscript)")
 	}
-	// Find out now whether Costco is signed in, so that the model can say so.
-	if ok, code, err := a.costcoWarehouse(ctx); !ok {
+	// Find out now whether the site is signed in, so that the model can say so.
+	if store == "costco" {
+		if ok, code, err := a.costcoWarehouse(ctx); !ok {
+			return code, err
+		}
+	} else if ok, code, err := a.signedIn(ctx, doordashOrders, name); !ok {
 		return code, err
 	}
 	logPath := filepath.Join(session.Dir(), "costco-job.log")
 	_ = os.Remove(logPath)
-	if err := session.Spawn("costco", append(append([]string{}, a.job...), strings.Join(args, ",")), logPath); err != nil {
+	if err := session.Spawn("costco", append(append([]string{}, a.job...), store+":"+strings.Join(args, ",")), logPath); err != nil {
 		return exitError, err
 	}
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
 		if _, ok := currentJob(); ok {
-			fmt.Fprintf(a.out, "STARTED a background job for %s. It opens every warehouse receipt and online order, joins them into ONE PDF per calendar year and sends those PDFs to Chinmay itself. It takes about 5 minutes per year.\nNow reply to Chinmay: \"I am collecting your Costco receipts for %s. You will get one PDF per year here in a few minutes.\" Then stop. Do not fetch receipts yourself and do not run this again. If he asks how it is going: novee-browse costco-year-pdf status\n", names, names)
+			fmt.Fprintf(a.out, "STARTED a background job for %s, %s. It opens every receipt, joins them into ONE PDF per calendar year and sends those PDFs to Chinmay itself. It takes about 5 minutes per year.\nNow reply to Chinmay: \"I am collecting your %s receipts for %s. You will get one PDF per year here in a few minutes.\" Then stop. Do not fetch receipts yourself and do not run this again. If he asks how it is going: novee-browse %s status\n", name, names, name, names, cmd)
 			return exitOK, nil
 		}
 	}
@@ -148,17 +164,22 @@ func costcoJobMain(arg string) int {
 	a.keeper, a.viewer, a.job = []string{exe, "_keeper"}, []string{exe, "_viewer"}, []string{exe, "_costcojob"}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
-	job := &yearJob{Pid: os.Getpid(), Started: time.Now(), Years: arg, Phase: "opening Costco"}
+	store, years, _ := strings.Cut(arg, ":")
+	job := &yearJob{Store: store, Pid: os.Getpid(), Started: time.Now(), Years: years, Phase: "opening " + storeName[store]}
 	job.save()
 	defer os.Remove(jobFile())
-	want, names, err := parseYears(strings.Split(arg, ","))
+	want, names, err := parseYears(strings.Split(years, ","))
 	if err == nil {
 		job.Years = names
-		err = a.runYearJob(ctx, job, want)
+		if store == "doordash" {
+			err = a.runDoordashJob(ctx, job, want)
+		} else {
+			err = a.runYearJob(ctx, job, want)
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(a.out, "ERROR:", err)
-		_ = notifyOwner("Costco receipts: the job stopped before it was done. " + err.Error())
+		_ = notifyOwner(storeName[store] + " receipts: the job stopped before it was done. " + err.Error())
 		return exitError
 	}
 	return exitOK
@@ -322,6 +343,21 @@ func (a *app) runYearJob(ctx context.Context, job *yearJob, want map[int]bool) e
 		return err
 	}
 
+	return a.sendYearPDFs(ctx, job, docs, failed, func(ds []doc) string {
+		on := 0
+		for _, d := range ds {
+			if d.Kind == "online" {
+				on++
+			}
+		}
+		return fmt.Sprintf("%d warehouse receipts and %d online orders", len(ds)-on, on)
+	})
+}
+
+// sendYearPDFs joins the fetched receipts into one PDF per calendar year,
+// oldest first, and sends each to the owner. count words the receipts of a year.
+func (a *app) sendYearPDFs(ctx context.Context, job *yearJob, docs []doc, failed int, count func([]doc) string) error {
+	name := storeName[job.Store]
 	// One PDF per calendar year, oldest receipt first.
 	job.Phase = "joining the PDFs"
 	job.save()
@@ -335,29 +371,23 @@ func (a *app) runYearJob(ctx context.Context, job *yearJob, want map[int]bool) e
 		byYear[d.When.Year()] = append(byYear[d.When.Year()], d)
 	}
 	if len(years) == 0 {
-		return notifyOwner(fmt.Sprintf("Costco receipts: the site lists no receipts or orders for %s.", job.Years))
+		return notifyOwner(fmt.Sprintf("%s receipts: the site lists no receipts or orders for %s.", name, job.Years))
 	}
-	outDir := filepath.Join(outDir(), "costco")
+	outDir := filepath.Join(outDir(), job.Store)
 	if err := os.MkdirAll(outDir, 0o700); err != nil {
 		return err
 	}
 	for _, y := range years {
 		ds := byYear[y]
 		var in []string
-		wh, on := 0, 0
 		for _, d := range ds {
 			in = append(in, d.Path)
-			if d.Kind == "online" {
-				on++
-			} else {
-				wh++
-			}
 		}
-		out := filepath.Join(outDir, fmt.Sprintf("Costco-receipts-%d.pdf", y))
+		out := filepath.Join(outDir, fmt.Sprintf("%s-receipts-%d.pdf", name, y))
 		if err := mergePDFs(ctx, out, in); err != nil {
 			return err
 		}
-		caption := fmt.Sprintf("Costco %d: %d warehouse receipts and %d online orders, %s to %s, oldest first.", y, wh, on,
+		caption := fmt.Sprintf("%s %d: %s, %s to %s, oldest first.", name, y, count(ds),
 			ds[0].When.Format("01/02/2006"), ds[len(ds)-1].When.Format("01/02/2006"))
 		fmt.Fprintln(a.out, caption, out)
 		if err := notifyOwnerFile(caption, out); err != nil {
@@ -365,10 +395,10 @@ func (a *app) runYearJob(ctx context.Context, job *yearJob, want map[int]bool) e
 		}
 	}
 	if failed > 0 {
-		return notifyOwner(fmt.Sprintf("Costco receipts: done, but %d receipts could not be opened and are missing from the PDFs. Ask again to retry.", failed))
+		return notifyOwner(fmt.Sprintf("%s receipts: done, but %d receipts could not be opened and are missing from the PDFs. Ask again to retry.", name, failed))
 	}
 	if len(years) > 1 {
-		return notifyOwner(fmt.Sprintf("Costco receipts: done. One PDF each for %s.", strings.Trim(strings.Join(strings.Fields(fmt.Sprint(years)), ", "), "[]")))
+		return notifyOwner(fmt.Sprintf("%s receipts: done. One PDF each for %s.", name, strings.Trim(strings.Join(strings.Fields(fmt.Sprint(years)), ", "), "[]")))
 	}
 	return nil
 }
@@ -500,15 +530,22 @@ func fetchOrder(ctx context.Context, p *page.Page, num string) ([]byte, error) {
 	return p.ContentPDF(ctx)
 }
 
-// mergePDFs joins PDFs in order with Ghostscript.
+// mergePDFs joins PDFs in order with Ghostscript. Pictures in them (store
+// logos, drop-off photos) are reduced to screen quality; text stays text.
 func mergePDFs(ctx context.Context, out string, in []string) error {
 	gs, err := exec.LookPath("gs")
 	if err != nil {
 		return errors.New("Ghostscript is needed to join PDFs and is not installed (sudo apt install ghostscript)")
 	}
-	args := append([]string{"-q", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite", "-dAutoRotatePages=/None", "-sOutputFile=" + out}, in...)
-	if msg, err := exec.CommandContext(ctx, gs, args...).CombinedOutput(); err != nil {
-		return fmt.Errorf("joining the PDFs failed: %v: %s", err, strings.TrimSpace(string(msg)))
+	for _, quality := range []string{"/ebook", "/screen"} {
+		args := append([]string{"-q", "-dBATCH", "-dNOPAUSE", "-sDEVICE=pdfwrite", "-dPDFSETTINGS=" + quality,
+			"-dAutoRotatePages=/None", "-sOutputFile=" + out}, in...)
+		if msg, err := exec.CommandContext(ctx, gs, args...).CombinedOutput(); err != nil {
+			return fmt.Errorf("joining the PDFs failed: %v: %s", err, strings.TrimSpace(string(msg)))
+		}
+		if st, err := os.Stat(out); err == nil && st.Size() < 45<<20 { // a chat takes files up to about 50 MB
+			break
+		}
 	}
 	return nil
 }

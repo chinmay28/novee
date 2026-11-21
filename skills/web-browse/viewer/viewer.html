@@ -62,7 +62,9 @@ function unquote(s) { try { return JSON.parse(s); } catch (e) { return ''; } }
 async function refresh() {
   if (finished) return;
   try {
-    const size = '&w=' + Math.round(document.documentElement.clientWidth) + '&h=' + Math.round(innerHeight * 0.62);
+    // Tall enough to show a whole sign-in form; this page scrolls if the picture is longer than the screen.
+    const cw = Math.round(document.documentElement.clientWidth);
+    const size = '&w=' + cw + '&h=' + Math.max(Math.round(innerHeight * 0.62), Math.round(cw * 1.9));
     const r = await fetch('/frame' + q + size, {cache: 'no-store'});
     if (r.status === 403) { finished = true; msg.textContent = 'This link has ended. Ask Novee for a new one if you still need to sign in.'; return; }
     if (r.ok) {

@@ -17,6 +17,7 @@ type Element struct {
 	Name  string `json:"name"` // what a person would call it
 	Value string `json:"value"`
 	Host  string `json:"host"` // for a link that leaves the site: where it goes
+	Href  string `json:"href"` // for a link: its full address
 	// InView is true when the element is on or just below the visible screen.
 	InView  bool     `json:"inView"`
 	Options []string `json:"options"`
@@ -100,10 +101,10 @@ const __nv = (el, ref) => {
   if (kind === 'checkbox') value = (el.checked || el.getAttribute('aria-checked') === 'true') ? 'checked' : 'not checked';
   else if (kind === 'select' && tag === 'select') value = __clean(el.selectedOptions[0] ? el.selectedOptions[0].text : '');
   else if ((kind === 'input' || kind === 'textarea') && type !== 'password') value = __clean(el.value || '').slice(0, 60);
-  let host = '';
-  if (kind === 'link' && el.href) { try { const u = new URL(el.href); if (u.host && u.host !== location.host) host = u.host; } catch (e) {} }
+  let host = '', href = '';
+  if (kind === 'link' && el.href) { try { const u = new URL(el.href); href = u.href; if (u.host && u.host !== location.host) host = u.host; } catch (e) {} }
   return {
-    ref: ref, kind: kind, type: type, name: name, value: value, host: host,
+    ref: ref, kind: kind, type: type, name: name, value: value, host: host, href: href,
     inView: r.bottom > -50 && r.top < innerHeight * 1.5,
     options: tag === 'select' ? Array.from(el.options).slice(0, 20).map(o => __clean(o.text)) : [],
     password: type === 'password',
