@@ -218,6 +218,11 @@ func ddFetchLive(ctx context.Context, p *page.Page, o ddOrder) (time.Time, strin
 				break
 			}
 		}
+		// A cancelled order has no receipt lines and no date: its page is kept as it is, under the list's day.
+		if strings.Contains(s.Text, "Order Cancelled") && time.Since(start) > 4*time.Second {
+			when = time.Date(o.Day.Year(), o.Day.Month(), o.Day.Day(), 12, 0, 0, 0, time.Local)
+			break
+		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
 			return when, "", nil, errors.New("the order page did not load")
 		}
@@ -227,8 +232,10 @@ func ddFetchLive(ctx context.Context, p *page.Page, o ddOrder) (time.Time, strin
 	if i := strings.Index(text, "Order "); i > 0 && i < 400 {
 		text = text[i:]
 	}
-	if i := strings.Index(text, "Create a business profile"); i > 0 {
-		text = text[:i]
+	for _, end := range []string{"Create a business profile", "Reorder from your go-to stores"} {
+		if i := strings.Index(text, end); i > 0 {
+			text = text[:i]
+		}
 	}
 	data, err := p.PDF(ctx)
 	return when, strings.TrimSpace(text), data, err
@@ -289,6 +296,7 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 	var day time.Time // zero: the newest of the year
 	year := time.Now().Year()
 	var words []string
+	nth := 0
 	if strings.EqualFold(pos[0], "last") || strings.EqualFold(pos[0], "latest") {
 		if year, err = yearArg(pos[1:], usage); err != nil {
 			return exitError, err
@@ -300,7 +308,13 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 			}
 		}
 		year = day.Year()
-		words = strings.Fields(strings.ToLower(strings.Join(pos[1:], " ")))
+		for _, w := range strings.Fields(strings.ToLower(strings.Join(pos[1:], " "))) {
+			if n, err := strconv.Atoi(strings.TrimPrefix(w, "#")); err == nil && strings.HasPrefix(w, "#") && n > 0 {
+				nth = n // "#2": the second of several orders that read the same
+			} else {
+				words = append(words, w)
+			}
+		}
 	}
 	orders, ok, code, err := a.ddList(ctx, year)
 	if !ok {
@@ -327,10 +341,15 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 		}
 		fmt.Fprintf(a.out, "Verdict: NOT FOUND. DoorDash's order history has no order %s. For the dates that exist run: novee-browse doordash-receipts %d\n", what, year)
 		return exitOK, nil
-	case !day.IsZero() && len(match) > 1 && (match[0].String() != match[1].String() || len(words) == 0):
+	case nth > len(match):
+		fmt.Fprintf(a.out, "Verdict: NOT FOUND. Only %d orders match on %s.\n", len(match), day.Format("01/02/2006"))
+		return exitOK, nil
+	case nth > 0:
+		match = match[nth-1:]
+	case !day.IsZero() && len(match) > 1:
 		fmt.Fprintf(a.out, "Verdict: %d DoorDash orders on %s. Ask Chinmay which one, or use the command for the one he means:\n", len(match), day.Format("01/02/2006"))
-		for _, o := range match {
-			fmt.Fprintf(a.out, "- %s -> novee-browse doordash-receipt %s %s %s\n", o, day.Format("01/02/2006"), o.Store, o.Total)
+		for i, o := range match {
+			fmt.Fprintf(a.out, "- %s -> novee-browse doordash-receipt %s %s #%d\n", o, day.Format("01/02/2006"), strings.Join(words, " "), i+1)
 		}
 		return exitOK, nil
 	}

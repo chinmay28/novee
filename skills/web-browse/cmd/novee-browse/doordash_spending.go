@@ -140,7 +140,7 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 		}
 	}
 	var spends []spend
-	var unread []string
+	var unread, cancelled []string
 	_, err = a.withPage(func(p *page.Page) (int, error) {
 		for round := 1; round <= 2 && len(todo) > 0; round++ {
 			var again []ddOrder
@@ -159,6 +159,10 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 					continue
 				}
 				if when.Year() != year {
+					continue
+				}
+				if strings.Contains(text, "Order Cancelled") {
+					cancelled = append(cancelled, o.Day.Format("01/02")+" "+o.Store)
 					continue
 				}
 				sp, ok := ddSpend(o, when, text)
@@ -183,7 +187,7 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 		return notifyOwner(fmt.Sprintf("DoorDash spending %d: no receipts could be read.", year))
 	}
 	sort.SliceStable(spends, func(i, j int) bool { return spends[i].When.Before(spends[j].When) })
-	report := spendingReport(year, spends, unread)
+	report := spendingReport(year, spends, unread, cancelled)
 	fmt.Fprintln(a.out, report)
 
 	dir := filepath.Join(outDir(), "doordash")
@@ -212,7 +216,7 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 }
 
 // spendingReport is the message the owner gets: plain lines, no table.
-func spendingReport(year int, spends []spend, unread []string) string {
+func spendingReport(year int, spends []spend, unread, cancelled []string) string {
 	type sum struct {
 		n                     int
 		charged, credits, net float64
@@ -243,6 +247,9 @@ func spendingReport(year int, spends []spend, unread []string) string {
 	fmt.Fprintf(b, "Total: %d orders, charged $%.2f + credits $%.2f = net $%.2f", all.n, all.charged, all.credits, all.net)
 	if gifts.n > 0 {
 		fmt.Fprintf(b, "\nIncluded above: %d gift card purchases through DoorDash, $%.2f. If those gift cards became the credits, that money is counted twice.", gifts.n, gifts.net)
+	}
+	if len(cancelled) > 0 {
+		fmt.Fprintf(b, "\nNot counted, cancelled: %s. Credits DoorDash gave back for a cancelled order are counted in the month they were used.", strings.Join(cancelled, "; "))
 	}
 	if len(unread) > 0 {
 		fmt.Fprintf(b, "\nNOT included, could not be read: %s.", strings.Join(unread, "; "))

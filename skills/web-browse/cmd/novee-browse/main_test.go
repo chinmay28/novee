@@ -334,7 +334,9 @@ func TestBrowseEndToEnd(t *testing.T) {
 	wants(got, "Verdict: FOUND. The last DoorDash order of "+fmt.Sprint(now.Year())+": the receipt of "+now.Format("01/02/2006")+" 08:19pm, Mehak of India, total $16.20.",
 		"DoorDash Credits", "File: ")
 	_, got = run("doordash-receipt", now.Format("01/02/2006"))
-	wants(got, "Verdict: 2 DoorDash orders on "+now.Format("01/02/2006"), "novee-browse doordash-receipt "+now.Format("01/02/2006")+" Chaat Cafe $27.60")
+	wants(got, "Verdict: 2 DoorDash orders on "+now.Format("01/02/2006"), "novee-browse doordash-receipt "+now.Format("01/02/2006")+"  #2")
+	_, got = run("doordash-receipt", now.Format("01/02/2006"), "#2", "--no-send")
+	wants(got, "Chaat Cafe, total $27.60")
 	_, got = run("doordash-receipt", now.Format("01/02/2006"), "chaat", "--no-send")
 	wants(got, "Chaat Cafe, total $27.60", "File: ")
 	// A "download" button that only prints is answered with the printed page.
