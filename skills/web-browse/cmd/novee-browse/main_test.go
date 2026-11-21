@@ -130,7 +130,7 @@ if (location.hash !== '#again') localStorage.setItem('seen', '1');</script>`)
 		case "b1":
 			when, store, total = ddOld, "Dunkin'", "$18.90"
 		}
-		fmt.Fprintf(w, `<title>Order</title><main><h1>Order Complete</h1><p>%s at 8:19 PM</p><p>%s</p><p>Subtotal $1.00</p><p>Total %s</p><button onclick="print()">Download receipt</button></main>`,
+		fmt.Fprintf(w, `<title>Order</title><main><h1>Order Complete</h1><p>%s at 8:19 PM</p><p>%s</p><div>Subtotal</div><div>$30.00</div><div>Delivery Fee</div><div>$2.99</div><div>$0.00</div><div>DoorDash Credits</div><div>-$5.00</div><div>Total</div><div>%s</div><div>Payment</div><div>$99.99</div><button onclick="print()">Download receipt</button></main>`,
 			when.Format("Monday, January 2, 2006"), store, total)
 	})
 	mux.HandleFunc("/ordered", func(w http.ResponseWriter, r *http.Request) { ordered.Add(1) })
@@ -332,7 +332,7 @@ func TestBrowseEndToEnd(t *testing.T) {
 	wants(got, "- "+old.Format("01/02/2006")+", Dunkin', total $18.90")
 	_, got = run("doordash-receipt", "last", "--no-send")
 	wants(got, "Verdict: FOUND. The last DoorDash order of "+fmt.Sprint(now.Year())+": the receipt of "+now.Format("01/02/2006")+" 08:19pm, Mehak of India, total $16.20.",
-		"Subtotal $1.00", "File: ")
+		"DoorDash Credits", "File: ")
 	_, got = run("doordash-receipt", now.Format("01/02/2006"))
 	wants(got, "Verdict: 2 DoorDash orders on "+now.Format("01/02/2006"), "novee-browse doordash-receipt "+now.Format("01/02/2006")+" Chaat Cafe $27.60")
 	_, got = run("doordash-receipt", now.Format("01/02/2006"), "chaat", "--no-send")
@@ -346,6 +346,29 @@ func TestBrowseEndToEnd(t *testing.T) {
 		if err := os.WriteFile(sendFile, []byte("#!/bin/sh\necho \"$1|$2\" >> "+sentLog+"\n"), 0o700); err != nil {
 			t.Fatal(err)
 		}
+		// Spending per month: what was charged plus the credits line of every receipt.
+		_, got = run("doordash-spending", fmt.Sprint(now.Year()))
+		wants(got, "STARTED a background job", "novee-browse doordash-spending status")
+		for i := 0; i < 240; i++ {
+			if _, ok := currentJob(); !ok {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		spent, _ := os.ReadFile(sentLog)
+		month := now.Format("Jan")
+		if now.Year() == old.Year() { // the third order is in the same year, in another month
+			if !strings.Contains(string(spent), "Total: 3 orders, charged $62.70 + credits $15.00 = net $77.70") {
+				t.Errorf("spending report:\n%s", spent)
+			}
+		} else if !strings.Contains(string(spent), "- "+month+": 2 orders, charged $43.80 + credits $10.00 = net $53.80") ||
+			!strings.Contains(string(spent), "Total: 2 orders, charged $43.80 + credits $10.00 = net $53.80") {
+			t.Errorf("spending report:\n%s", spent)
+		}
+		if !strings.Contains(string(spent), "DoorDash-spending-"+fmt.Sprint(now.Year())+".csv") {
+			t.Errorf("the owner must also get the per-order file:\n%s", spent)
+		}
+		_ = os.Remove(sentLog)
 		_, got = run("doordash-year-pdf", "all")
 		wants(got, "STARTED a background job for DoorDash, all years", "novee-browse doordash-year-pdf status")
 		for i := 0; i < 240; i++ {

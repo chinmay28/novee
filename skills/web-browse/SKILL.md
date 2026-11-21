@@ -106,6 +106,10 @@ Never loop over `costco-receipt` to collect many receipts: each run sends Chinma
 - `novee-browse doordash-receipts 2026`: every order of the year with date, store and total.
 - `novee-browse doordash-year-pdf all` (or a year): one PDF per calendar year with every receipt, made by a background job that sends the files itself. About 15 minutes per year.
 
+- `novee-browse doordash-spending 2026`: what was spent per month, worked out from every receipt of the year. For each month it gives the number of orders, the amount charged, the DoorDash credits used (the receipt line "DoorDash Credits") and the two together (net), with a year total, and sends Chinmay that breakdown plus a file with one line per order. A background job: about 20 minutes the first time for a year, a minute or two after that. `doordash-spending status` says how far it is.
+
+For any question about amounts over many orders (spending, totals, averages, credits) use `doordash-spending`. Do not add numbers up yourself and do not answer from the order list: an order paid with credits shows $0.00 there.
+
 The answers read the same as Costco's (`Verdict:`, `PDF SENT`, `NOT sent`, `STARTED`, `BUSY`, `SIGN-IN LINK SENT`). A total of `$0.00` in the list is what DoorDash shows for an order paid together with another one; the receipt has the real amounts.
 
 ## Examples

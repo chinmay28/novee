@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -154,6 +155,42 @@ func (a *app) ddList(ctx context.Context, since int) ([]ddOrder, bool, int, erro
 // ddFetch opens an order's own page and returns its exact time, its text and
 // the receipt as the site prints it.
 func ddFetch(ctx context.Context, p *page.Page, o ddOrder) (time.Time, string, []byte, error) {
+	// An order that is a few days old does not change any more, and opening
+	// its page takes seconds: keep what was read.
+	base := filepath.Join(session.Dir(), "doordash-orders", ddID(o.URL))
+	var c struct {
+		When time.Time `json:"when"`
+		Text string    `json:"text"`
+	}
+	if data, err := os.ReadFile(base + ".json"); err == nil && json.Unmarshal(data, &c) == nil && !c.When.IsZero() {
+		if pdf, err := os.ReadFile(base + ".pdf"); err == nil {
+			return c.When, c.Text, pdf, nil
+		}
+	}
+	when, text, pdf, err := ddFetchLive(ctx, p, o)
+	if err == nil && time.Since(when) > 72*time.Hour && os.MkdirAll(filepath.Dir(base), 0o700) == nil {
+		c.When, c.Text = when, text
+		data, _ := json.Marshal(c)
+		if os.WriteFile(base+".pdf", pdf, 0o600) == nil {
+			_ = os.WriteFile(base+".json", data, 0o600)
+		}
+	}
+	return when, text, pdf, err
+}
+
+// ddID is the order's id: the last part of its address.
+func ddID(url string) string {
+	url, _, _ = strings.Cut(url, "?")
+	id := unsafeName.ReplaceAllString(url[strings.LastIndex(url, "/")+1:], "")
+	if id == "" {
+		id = "order"
+	}
+	return id
+}
+
+var unsafeName = regexp.MustCompile(`[^A-Za-z0-9-]`)
+
+func ddFetchLive(ctx context.Context, p *page.Page, o ddOrder) (time.Time, string, []byte, error) {
 	if err := p.Goto(ctx, o.URL); err != nil {
 		return time.Time{}, "", nil, err
 	}

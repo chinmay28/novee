@@ -67,6 +67,7 @@ DoorDash order and receipt questions work the same way, with `doordash` in place
 - The latest order ("my last DoorDash receipt"): `novee-browse doordash-receipt last` (or `last 2025`).
 - The order of one day: `novee-browse doordash-receipt 11/15/2026`. If the output lists several orders that day, ask Chinmay which store, or add the store: `novee-browse doordash-receipt 11/15/2026 mehak`.
 - Which orders exist in a year, with dates, stores and totals: `novee-browse doordash-receipts 2026`
+- Spending on DoorDash ("spending breakdown", "how much did I spend", "per month", "including DoorDash credits"): `novee-browse doordash-spending 2026`. It reads every receipt of the year, including the "DoorDash Credits" line, and sends Chinmay the monthly breakdown itself: charged, credits used, and both together. Reply what the output tells you to reply and stop. Never add up amounts from a list yourself: list totals leave out credits, and your sums are not reliable. This is not a request for receipt PDFs: do not run `doordash-year-pdf` for it.
 - All DoorDash receipts as one PDF per calendar year: `novee-browse doordash-year-pdf all` (or a year). A background job, like the Costco one; only one such job runs at a time.
 
 Other shop, order and account questions (online orders, another site Chinmay has an account on, a page that needs a sign-in) go through the same tool one step at a time.

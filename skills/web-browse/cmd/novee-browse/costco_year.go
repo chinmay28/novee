@@ -58,7 +58,7 @@ func (j *yearJob) save() {
 }
 
 func (j *yearJob) describe() string {
-	return fmt.Sprintf("%s, started %d minutes ago for %s; now: %s; %d receipts fetched so far",
+	return fmt.Sprintf("%s, started %d minutes ago for %s; now: %s; %d receipts read so far",
 		storeName[j.Store], int(time.Since(j.Started).Minutes()), j.Years, j.Phase, j.Fetched)
 }
 
@@ -165,13 +165,17 @@ func costcoJobMain(arg string) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	store, years, _ := strings.Cut(arg, ":")
-	job := &yearJob{Store: store, Pid: os.Getpid(), Started: time.Now(), Years: years, Phase: "opening " + storeName[store]}
+	job := &yearJob{Store: strings.TrimSuffix(store, "-spending"), Pid: os.Getpid(), Started: time.Now(), Years: years, Phase: "opening the site"}
 	job.save()
 	defer os.Remove(jobFile())
 	want, names, err := parseYears(strings.Split(years, ","))
 	if err == nil {
 		job.Years = names
-		if store == "doordash" {
+		if store == "doordash-spending" {
+			job.Store = "doordash"
+			job.save()
+			err = a.runDoordashSpending(ctx, job, want)
+		} else if store == "doordash" {
 			err = a.runDoordashJob(ctx, job, want)
 		} else {
 			err = a.runYearJob(ctx, job, want)
@@ -179,7 +183,7 @@ func costcoJobMain(arg string) int {
 	}
 	if err != nil {
 		fmt.Fprintln(a.out, "ERROR:", err)
-		_ = notifyOwner(storeName[store] + " receipts: the job stopped before it was done. " + err.Error())
+		_ = notifyOwner(storeName[job.Store] + ": the job stopped before it was done. " + err.Error())
 		return exitError
 	}
 	return exitOK
