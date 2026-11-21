@@ -358,17 +358,17 @@ func TestBrowseEndToEnd(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 		}
 		spent, _ := os.ReadFile(sentLog)
-		month := now.Format("Jan")
+		wantLines := []string{"DoorDash Spending Breakdown - " + fmt.Sprint(now.Year()), now.Format("January") + " (so far)\n• Orders: 2\n• Spent: $53.80\n• Card $43.80 + credits $10.00",
+			"Credits check\n• Used on food and grocery: ", "show no DoorDash gift cards"}
 		if now.Year() == old.Year() { // the third order is in the same year, in another month
-			if !strings.Contains(string(spent), "Total: 3 orders, net $77.70 (charged $62.70 + credits $15.00)") {
-				t.Errorf("spending report:\n%s", spent)
-			}
-		} else if !strings.Contains(string(spent), "- "+month+": 2 orders, net $53.80 (charged $43.80 + credits $10.00). Restaurants $53.80, grocery $0.00") ||
-			!strings.Contains(string(spent), "Total: 2 orders, net $53.80 (charged $43.80 + credits $10.00)") {
-			t.Errorf("spending report:\n%s", spent)
+			wantLines = append(wantLines, "Total "+fmt.Sprint(now.Year())+"\n• Orders: 3\n• Spent: $77.70\n• Card $62.70 + credits $15.00")
+		} else {
+			wantLines = append(wantLines, "Total "+fmt.Sprint(now.Year())+"\n• Orders: 2\n• Spent: $53.80\n• Card $43.80 + credits $10.00")
 		}
-		if !strings.Contains(string(spent), "DoorDash credits check") || !strings.Contains(string(spent), "show no DoorDash gift cards") {
-			t.Errorf("the report must account for the credits and check Costco:\n%s", spent)
+		for _, w := range wantLines {
+			if !strings.Contains(string(spent), w) {
+				t.Errorf("the spending report lacks %q:\n%s", w, spent)
+			}
 		}
 		if !strings.Contains(string(spent), "DoorDash-spending-"+fmt.Sprint(now.Year())+".csv") {
 			t.Errorf("the owner must also get the per-order file:\n%s", spent)
