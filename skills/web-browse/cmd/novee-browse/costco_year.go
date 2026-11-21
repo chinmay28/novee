@@ -459,7 +459,8 @@ func fetchReceipt(ctx context.Context, p *page.Page, r costcoReceipt, occ int) (
 		if s, err = p.Snapshot(ctx); err != nil {
 			return nil, err
 		}
-		if s.Dialog && strings.Contains(s.Text, date) {
+		// A return is listed under the date of the purchase but carries the date of the return.
+		if s.Dialog && (strings.Contains(s.Text, date) || (r.Return && strings.Contains(s.Text, "TOTAL"))) {
 			break
 		}
 		if time.Now().After(deadline) || ctx.Err() != nil {
