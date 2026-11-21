@@ -54,7 +54,8 @@ var (
 	ddPrice = regexp.MustCompile(`^(-?\$[\d,]+\.\d{2}) • \d+ items?\b`)
 	ddFull  = regexp.MustCompile(`[A-Z][a-z]+day, ([A-Z][a-z]+ \d{1,2}, \d{4}) at (\d{1,2}:\d{2} [AP]M)`)
 	// Some order pages (gift cards) give the day without a year; the payment line has it in full.
-	ddPaid = regexp.MustCompile(`· (\d{1,2}/\d{1,2}/\d{4}) · (\d{1,2}:\d{2} [AP]M)`)
+	ddClock = regexp.MustCompile(`\bat (\d{1,2}:\d{2} [AP]M)`)
+	ddPaid  = regexp.MustCompile(`· (\d{1,2}/\d{1,2}/\d{4}) · (\d{1,2}:\d{2} [AP]M)`)
 )
 
 // ddParse reads the order list as it is on screen: newest first, a date line
@@ -152,13 +153,14 @@ func (a *app) ddList(ctx context.Context, since int) ([]ddOrder, bool, int, erro
 
 // ddFetch opens an order's own page and returns its exact time, its text and
 // the receipt as the site prints it.
-func ddFetch(ctx context.Context, p *page.Page, url string) (time.Time, string, []byte, error) {
-	if err := p.Goto(ctx, url); err != nil {
+func ddFetch(ctx context.Context, p *page.Page, o ddOrder) (time.Time, string, []byte, error) {
+	if err := p.Goto(ctx, o.URL); err != nil {
 		return time.Time{}, "", nil, err
 	}
 	var s page.Snapshot
 	var when time.Time
-	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(time.Second) {
+	start := time.Now()
+	for deadline := start.Add(30 * time.Second); ; time.Sleep(time.Second) {
 		var err error
 		if s, err = p.Snapshot(ctx); err != nil {
 			return when, "", nil, err
@@ -168,6 +170,12 @@ func ddFetch(ctx context.Context, p *page.Page, url string) (time.Time, string, 
 				when, _ = time.ParseInLocation("January 2, 2006 3:04 PM", m[1]+" "+m[2], time.Local)
 			} else if m := ddPaid.FindStringSubmatch(s.Text); m != nil {
 				when, _ = time.ParseInLocation("1/2/2006 3:04 PM", m[1]+" "+m[2], time.Local)
+			}
+			// A pickup paid with credits shows only "Pickup at 6:08 PM": the day is the list's.
+			if m := ddClock.FindStringSubmatch(s.Text); when.IsZero() && m != nil && time.Since(start) > 6*time.Second {
+				if t, err := time.Parse("3:04 PM", m[1]); err == nil {
+					when = time.Date(o.Day.Year(), o.Day.Month(), o.Day.Day(), t.Hour(), t.Minute(), 0, 0, time.Local)
+				}
 			}
 			if !when.IsZero() {
 				break
@@ -291,7 +299,7 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 	}
 	o := match[0]
 	return a.withPage(func(p *page.Page) (int, error) {
-		when, text, data, err := ddFetch(ctx, p, o.URL)
+		when, text, data, err := ddFetch(ctx, p, o)
 		if err != nil {
 			return exitError, err
 		}
@@ -366,7 +374,7 @@ func (a *app) runDoordashJob(ctx context.Context, job *yearJob, want map[int]boo
 				}
 				job.save()
 				session.Touch()
-				when, _, data, err := ddFetch(ctx, p, o.URL)
+				when, _, data, err := ddFetch(ctx, p, o)
 				if err != nil {
 					fmt.Fprintf(a.out, "round %d: could not fetch %s: %v\n", round, o, err)
 					again = append(again, o)
