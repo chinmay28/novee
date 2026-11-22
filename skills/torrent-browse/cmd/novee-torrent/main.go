@@ -941,7 +941,7 @@ func (t *tool) fetchedList(_ context.Context, _ []string) error {
 		}
 		fmt.Fprintf(t.out, "%d. %s (fetched %s, %s)\n", i+1, strings.TrimSuffix(filepath.Base(f), ".torrent"), when, state)
 	}
-	fmt.Fprintln(t.out, "To send Chinmay the newest K of these as one zip: novee-torrent send --last K. Do not fetch anything again for that.")
+	fmt.Fprintln(t.out, "To send Chinmay the newest K of these as one zip: novee-torrent send --last K. Do that whenever he asks for them, also when they are marked sent: he may want them again, or together. Do not fetch anything again for that.")
 	return nil
 }
 
