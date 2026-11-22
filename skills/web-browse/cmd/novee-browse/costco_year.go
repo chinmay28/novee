@@ -385,7 +385,7 @@ func (a *app) sendYearPDFs(ctx context.Context, job *yearJob, docs []doc, failed
 		for _, d := range ds {
 			in = append(in, d.Path)
 		}
-		out := filepath.Join(outDir, fmt.Sprintf("%s-receipts-%d.pdf", name, y))
+		out := filepath.Join(outDir, fmt.Sprintf("%s-receipts-%d.pdf", strings.ReplaceAll(name, " ", ""), y))
 		if err := mergePDFs(ctx, out, in); err != nil {
 			return err
 		}
