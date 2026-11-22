@@ -139,7 +139,7 @@ type storeInfo struct {
 
 var groceryName = regexp.MustCompile(`(?i)\b(grocery|groceries|bazar|bazaar|market|supermarket|mart|dashmart|pharmacy|convenience|liquor|foods)\b`)
 
-func storesFile() string { return filepath.Join(session.Dir(), "doordash-stores.json") }
+func storesFile(sh *shop) string { return filepath.Join(session.Dir(), sh.key+"-stores.json") }
 
 // ddStore says what kind of store this is. DoorDash sends grocery, pharmacy
 // and retail stores to an address with "convenience" in it; a restaurant's
@@ -179,11 +179,35 @@ func ddStore(ctx context.Context, p *page.Page, known map[string]storeInfo, name
 	return in
 }
 
-// doordashSpending starts the report job, or shows how far it is.
 func (a *app) doordashSpending(ctx context.Context, args []string) (int, error) {
-	const usage = "usage: doordash-spending YEAR | status. Example: doordash-spending 2026"
+	return a.shopSpending(ctx, shops["doordash"], args)
+}
+
+// ddBalance reads the credit balance from the payment page.
+func ddBalance(ctx context.Context, p *page.Page) float64 {
+	if p.Goto(ctx, strings.Replace(doordashURL(), "/orders", "/consumer/payment", 1)) != nil {
+		return -1
+	}
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline) && ctx.Err() == nil; time.Sleep(time.Second) {
+		s, err := p.Snapshot(ctx)
+		if err != nil {
+			break
+		}
+		lines := strings.Split(s.Text, "\n")
+		for i, line := range lines {
+			if line == "DoorDash Credits" && i+1 < len(lines) && money.MatchString(lines[i+1]) {
+				return dollars(lines[i+1])
+			}
+		}
+	}
+	return -1
+}
+
+// shopSpending starts the report job, or shows how far it is.
+func (a *app) shopSpending(ctx context.Context, sh *shop, args []string) (int, error) {
+	usage := fmt.Sprintf("usage: %s-spending YEAR | status. Example: %s-spending 2026", sh.key, sh.key)
 	if len(args) == 1 && (args[0] == "status" || args[0] == "stop") {
-		return a.yearPDF(ctx, "doordash", args)
+		return a.yearPDF(ctx, sh.key, args)
 	}
 	year, err := yearArg(args, usage)
 	if err != nil || len(args) != 1 {
@@ -193,17 +217,17 @@ func (a *app) doordashSpending(ctx context.Context, args []string) (int, error) 
 		fmt.Fprintf(a.out, "A job is ALREADY RUNNING: %s. Only one runs at a time; do not start another. Tell Chinmay it is still working and that the result will arrive in the chat.\n", job.describe())
 		return exitOK, nil
 	}
-	if ok, code, err := a.signedIn(ctx, doordashURL(), "DoorDash"); !ok {
+	if ok, code, err := a.signedIn(ctx, sh.url(), sh.name); !ok {
 		return code, err
 	}
 	logPath := filepath.Join(session.Dir(), "costco-job.log")
 	_ = os.Remove(logPath)
-	if err := session.Spawn("spending", append(append([]string{}, a.job...), fmt.Sprintf("doordash-spending:%d", year)), logPath); err != nil {
+	if err := session.Spawn("spending", append(append([]string{}, a.job...), fmt.Sprintf("%s-spending:%d", sh.key, year)), logPath); err != nil {
 		return exitError, err
 	}
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(200 * time.Millisecond) {
 		if _, ok := currentJob(); ok {
-			fmt.Fprintf(a.out, "STARTED a background job. It reads every DoorDash receipt of %d and sends Chinmay the report itself: food and grocery spending per month and per category (what was charged plus the DoorDash credits used), gift card purchases listed apart, and a check of the credits. The first time this takes about 25 minutes; later runs take a few minutes.\nNow reply to Chinmay: \"I am reading every DoorDash receipt of %d, including the DoorDash Credits line. You will get the breakdown here when it is done.\" Then stop. Do not add up amounts yourself and do not run this again. If he asks how it is going: novee-browse doordash-spending status\n", year, year)
+			fmt.Fprintf(a.out, "STARTED a background job. It reads every %s receipt of %d and sends Chinmay the report itself: food and grocery spending per month and per category (what was charged plus the %s used), gift card purchases listed apart, and a check of the credits. The first time this takes up to 25 minutes; later runs take a few minutes.\nNow reply to Chinmay: \"I am reading every %s receipt of %d, including the %s. You will get the breakdown here when it is done.\" Then stop. Do not add up amounts yourself and do not run this again. If he asks how it is going: novee-browse %s-spending status\n", sh.name, year, sh.credit, sh.name, year, sh.credit, sh.key)
 			return exitOK, nil
 		}
 	}
@@ -220,34 +244,38 @@ type ledger struct {
 	CostcoErr string
 }
 
-func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[int]bool) error {
+func (a *app) runShopSpending(ctx context.Context, sh *shop, job *yearJob, want map[int]bool) error {
 	year := 0
 	for y := range want {
 		year = y
 	}
 	job.Phase = "reading the order history"
 	job.save()
-	orders, ok, _, err := a.ddList(ctx, year)
+	orders, ok, _, err := sh.list(a, ctx, year)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return errors.New("DoorDash is not signed in. A sign-in link was sent; sign in and ask again")
+		return errors.New(sh.name + " is not signed in. A sign-in link was sent; sign in and ask again")
 	}
 	var todo []ddOrder
+	var unread, cancelled []string
 	for _, o := range orders {
-		if o.Day.Year() == year {
+		switch {
+		case o.Day.Year() != year:
+		case o.Cancelled:
+			cancelled = append(cancelled, o.Day.Format("01/02")+" "+o.Store)
+		default:
 			todo = append(todo, o)
 		}
 	}
-	shop := map[string]string{}
+	shopURL := map[string]string{}
 	for _, o := range todo {
 		if o.Shop != "" {
-			shop[o.Store] = o.Shop
+			shopURL[o.Store] = o.Shop
 		}
 	}
 	var spends []spend
-	var unread, cancelled []string
 	led := ledger{Balance: -1}
 	_, err = a.withPage(func(p *page.Page) (int, error) {
 		for round := 1; round <= 2 && len(todo) > 0; round++ {
@@ -260,7 +288,7 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 				job.Fetched = len(spends)
 				job.save()
 				session.Touch()
-				when, text, _, err := ddFetch(ctx, p, o)
+				when, text, _, err := sh.fetch(ctx, p, o)
 				if err != nil {
 					fmt.Fprintf(a.out, "round %d: could not read %s: %v\n", round, o, err)
 					again = append(again, o)
@@ -269,7 +297,7 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 				if when.Year() != year {
 					continue
 				}
-				if back := creditsBack(text); back > 0 {
+				if back := sh.back(text); back > 0 {
 					led.Back += back
 					led.BackNotes = append(led.BackNotes, fmt.Sprintf("%s %s $%.2f", when.Format("01/02"), o.Store, back))
 				}
@@ -277,7 +305,7 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 					cancelled = append(cancelled, o.Day.Format("01/02")+" "+o.Store)
 					continue
 				}
-				sp, ok := ddSpend(o, when, text)
+				sp, ok := sh.spend(o, when, text)
 				if !ok {
 					fmt.Fprintf(a.out, "no Total on the receipt of %s\n", o)
 					unread = append(unread, o.String())
@@ -293,54 +321,38 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 
 		// What kind of store each one is.
 		known := map[string]storeInfo{}
-		if data, err := os.ReadFile(storesFile()); err == nil {
+		if data, err := os.ReadFile(storesFile(sh)); err == nil {
 			_ = json.Unmarshal(data, &known)
 		}
 		for i := range spends {
 			job.Phase = fmt.Sprintf("looking up store %d of %d", i+1, len(spends))
 			job.save()
 			session.Touch()
-			in := ddStore(ctx, p, known, spends[i].Store, shop[spends[i].Store])
+			in := sh.store(ctx, p, known, spends[i].Store, shopURL[spends[i].Store])
 			spends[i].Category, spends[i].Cuisine = in.Category, in.Cuisine
 		}
 		if data, err := json.Marshal(known); err == nil {
-			_ = os.WriteFile(storesFile(), data, 0o600)
+			_ = os.WriteFile(storesFile(sh), data, 0o600)
 		}
 
 		// The credit balance, from the payment page.
 		job.Phase = "reading the credit balance"
 		job.save()
-		if p.Goto(ctx, strings.Replace(doordashURL(), "/orders", "/consumer/payment", 1)) == nil {
-			for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline) && ctx.Err() == nil; time.Sleep(time.Second) {
-				s, err := p.Snapshot(ctx)
-				if err != nil {
-					break
-				}
-				lines := strings.Split(s.Text, "\n")
-				for i, line := range lines {
-					if line == "DoorDash Credits" && i+1 < len(lines) && money.MatchString(lines[i+1]) {
-						led.Balance = dollars(lines[i+1])
-					}
-				}
-				if led.Balance >= 0 {
-					break
-				}
-			}
-		}
+		led.Balance = sh.balance(ctx, p)
 		return exitOK, nil
 	})
 	if err != nil {
 		return err
 	}
 	if len(spends) == 0 {
-		return notifyOwner(fmt.Sprintf("DoorDash spending %d: no receipts could be read.", year))
+		return notifyOwner(fmt.Sprintf("%s spending %d: no receipts could be read.", sh.name, year))
 	}
 	sort.SliceStable(spends, func(i, j int) bool { return spends[i].When.Before(spends[j].When) })
 
 	// DoorDash gift cards bought at Costco are where the credits come from.
-	job.Phase = "checking Costco for DoorDash gift cards"
+	job.Phase = "checking Costco for gift cards"
 	job.save()
-	if cards, err := a.costcoDoordashCards(ctx); err != nil {
+	if cards, err := a.costcoGiftCards(ctx, sh.card); err != nil {
 		led.CostcoErr = err.Error()
 		fmt.Fprintln(a.out, "Costco check:", err)
 	} else {
@@ -350,24 +362,24 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 	for i, j := 0, len(led.BackNotes)-1; i < j; i, j = i+1, j-1 { // oldest first, like everything else
 		led.BackNotes[i], led.BackNotes[j] = led.BackNotes[j], led.BackNotes[i]
 	}
-	report := spendingReport(year, spends, unread, cancelled, led)
+	report := spendingReport(sh, year, spends, unread, cancelled, led)
 	fmt.Fprintln(a.out, strings.Join(report, "\n\n"))
 
-	dir := filepath.Join(outDir(), "doordash")
+	dir := filepath.Join(outDir(), sh.key)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
 	}
-	path := filepath.Join(dir, fmt.Sprintf("DoorDash-spending-%d.csv", year))
+	path := filepath.Join(dir, fmt.Sprintf("%s-spending-%d.csv", strings.ReplaceAll(sh.name, " ", ""), year))
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	w := csv.NewWriter(f)
 	rate := costcoRate(led.Costco) // credits at the price paid for them at Costco, if that is known
-	if rate == 0 {
+	if rate == 0 || !sh.priced {
 		rate = 1
 	}
-	_ = w.Write([]string{"date", "time", "store", "category", "cuisine", "item", "subtotal", "charged", "doordash_credits", "net", "real_cost", "receipt"})
+	_ = w.Write([]string{"date", "time", "store", "category", "cuisine", "item", "subtotal", "charged", "credits", "net", "real_cost", "receipt"})
 	for _, s := range spends {
 		item := ""
 		if s.Category == catGift {
@@ -385,7 +397,7 @@ func (a *app) runDoordashSpending(ctx context.Context, job *yearJob, want map[in
 			return err
 		}
 	}
-	return notifyOwnerFile(fmt.Sprintf("DoorDash %d, one line per order with its category (opens in a spreadsheet).", year), path)
+	return notifyOwnerFile(fmt.Sprintf("%s %d, one line per order with its category (opens in a spreadsheet).", sh.name, year), path)
 }
 
 type sum struct {
@@ -433,7 +445,7 @@ func costcoRate(cards []costcoCards) float64 {
 // spendingReport is what the owner reads in a chat: a heading per month with
 // a few bullet lines under it, no tables. It comes as two messages, the
 // months and the credits, because one would be too long for a chat.
-func spendingReport(year int, spends []spend, unread, cancelled []string, led ledger) []string {
+func spendingReport(sh *shop, year int, spends []spend, unread, cancelled []string, led ledger) []string {
 	var months, rest, groc [13]sum
 	var all, allRest, allGroc, gifts sum
 	var giftLines []string
@@ -463,20 +475,23 @@ func spendingReport(year int, spends []spend, unread, cancelled []string, led le
 		}
 	}
 	rate := costcoRate(led.Costco)
+	if !sh.priced {
+		rate = 0
+	}
 	now := time.Now()
 
 	// First message: the months.
 	b := &strings.Builder{}
-	fmt.Fprintf(b, "DoorDash Spending Breakdown - %d\n", year)
+	fmt.Fprintf(b, "%s Spending Breakdown - %d\n", sh.name, year)
 	fmt.Fprintf(b, "Food and grocery from %d receipts", all.n)
 	if all.n > 0 {
 		fmt.Fprintf(b, ", %s to %s", first.Format("01/02"), last.Format("01/02"))
 	}
-	fmt.Fprintln(b, ".\nSpent = charged to your card + DoorDash credits used.")
+	fmt.Fprintf(b, ".\nSpent = charged to your card + %s used.\n", sh.credit)
 	block := func(title string, s, r, g sum) {
 		fmt.Fprintf(b, "\n%s\n• Orders: %d\n• Spent: %s\n", title, s.n, usd(s.net))
 		if s.credits > 0.005 {
-			fmt.Fprintf(b, "• Card %s + credits %s\n", usd(s.charged), usd(s.credits))
+			fmt.Fprintf(b, "• Card %s + %s %s\n", usd(s.charged), sh.short, usd(s.credits))
 		}
 		if g.n > 0 {
 			fmt.Fprintf(b, "• Restaurants %s, grocery %s\n", usd(r.net), usd(g.net))
@@ -494,10 +509,12 @@ func spendingReport(year int, spends []spend, unread, cancelled []string, led le
 			block(title, s, rest[m], groc[m])
 		}
 	}
-	fmt.Fprintf(b, "\nTotal %d\n• Orders: %d\n• Spent: %s\n• Card %s + credits %s\n", year, all.n, usd(all.net), usd(all.charged), usd(all.credits))
-	fmt.Fprintf(b, "• Restaurants: %d orders, %s\n• Grocery and retail: %d orders, %s\n", allRest.n, usd(allRest.net), allGroc.n, usd(allGroc.net))
+	fmt.Fprintf(b, "\nTotal %d\n• Orders: %d\n• Spent: %s\n• Card %s + %s %s\n", year, all.n, usd(all.net), usd(all.charged), sh.short, usd(all.credits))
+	if allGroc.n > 0 {
+		fmt.Fprintf(b, "• Restaurants: %d orders, %s\n• Grocery and retail: %d orders, %s\n", allRest.n, usd(allRest.net), allGroc.n, usd(allGroc.net))
+	}
 	if rate > 0 {
-		fmt.Fprintf(b, "• Real cost: %s (credits bought at Costco for %.0f cents per $1 saved you %s)\n", usd(all.charged+all.credits*rate), rate*100, usd(all.credits*(1-rate)))
+		fmt.Fprintf(b, "• Real cost: %s (gift cards bought at Costco for %.0f cents per $1 saved you %s)\n", usd(all.charged+all.credits*rate), rate*100, usd(all.credits*(1-rate)))
 	}
 	if len(cancelled) > 0 {
 		fmt.Fprintf(b, "\nNot counted, cancelled:\n• %s\n", strings.Join(cancelled, "\n• "))
@@ -512,12 +529,12 @@ func spendingReport(year int, spends []spend, unread, cancelled []string, led le
 
 	// Second message: gift cards and the credits, checked against where they came from.
 	b = &strings.Builder{}
-	fmt.Fprintf(b, "DoorDash Credits and Gift Cards - %d\n", year)
+	fmt.Fprintf(b, "%s: %s and Gift Cards - %d\n", sh.name, sh.credit, year)
 	if gifts.n > 0 {
-		fmt.Fprintf(b, "\nOther gift cards bought through DoorDash\n(not in the food figures)\n%s\n• Total: %s\n", strings.Join(giftLines, "\n"), usd(gifts.net))
+		fmt.Fprintf(b, "\nOther gift cards bought through "+sh.name+"\n(not in the food figures)\n%s\n• Total: %s\n", strings.Join(giftLines, "\n"), usd(gifts.net))
 	}
 	used := all.credits + gifts.credits
-	fmt.Fprintf(b, "\nCredits check\n• Used on food and grocery: %s\n• Used on gift cards: %s\n", usd(all.credits), usd(gifts.credits))
+	fmt.Fprintf(b, "\n"+sh.credit+" check\n• Used on food and grocery: %s\n• Used on gift cards: %s\n", usd(all.credits), usd(gifts.credits))
 	fmt.Fprintf(b, "• Given back for refunds and cancellations: %s\n", usd(led.Back))
 	for _, n := range led.BackNotes {
 		fmt.Fprintf(b, "   - %s\n", n)
@@ -528,20 +545,20 @@ func spendingReport(year int, spends []spend, unread, cancelled []string, led le
 		cards := int(loaded / 50)
 		fmt.Fprintf(b, "• Balance now: %s\n• Came from gift cards, or was there on 01/01: %s (%d x $50 + %s)\n", usd(led.Balance), usd(loaded), cards, usd(loaded-float64(cards)*50))
 	} else {
-		fmt.Fprintln(b, "• The balance could not be read from the payment page")
+		fmt.Fprintln(b, "• The balance now is not known, so how much came from gift cards cannot be worked out")
 	}
 	switch {
 	case led.CostcoErr != "":
-		fmt.Fprintf(b, "\n⚠️ DoorDash gift cards bought at Costco could not be checked: %s\n", led.CostcoErr)
+		fmt.Fprintf(b, "\n⚠️ %s gift cards bought at Costco could not be checked: %s\n", sh.cardName, led.CostcoErr)
 	case len(led.Costco) == 0:
-		fmt.Fprintln(b, "\nCostco's online orders show no DoorDash gift cards.")
+		fmt.Fprintf(b, "\nCostco's online orders show no %s gift cards.\n", sh.cardName)
 	default:
 		var yr, total struct {
 			n          int
 			face, paid float64
 		}
 		before := 0.0
-		fmt.Fprintln(b, "\nDoorDash gift cards bought at Costco\n(every online order Costco still lists)")
+		fmt.Fprintln(b, "\n"+sh.cardName+" gift cards bought at Costco\n(every online order Costco still lists)")
 		for _, c := range led.Costco {
 			fmt.Fprintf(b, "• %s: %d x $%.0f for %s\n", c.When.Format("01/02/2006"), c.Cards, c.Each, usd(c.Paid))
 			total.n += c.Cards
@@ -556,7 +573,7 @@ func spendingReport(year int, spends []spend, unread, cancelled []string, led le
 				before += c.Face
 			}
 		}
-		fmt.Fprintf(b, "• All together: %d cards, %s of credit for %s (%.0f cents per $1)\n", total.n, usd(total.face), usd(total.paid), rate*100)
+		fmt.Fprintf(b, "• All together: %d cards, %s of credit for %s (%.0f cents per $1)\n", total.n, usd(total.face), usd(total.paid), 100*total.paid/total.face)
 		fmt.Fprintf(b, "• Bought in %d: %d cards, %s of credit\n• Bought before %d: %s of credit\n", year, yr.n, usd(yr.face), year, usd(before))
 		if led.Balance >= 0 {
 			fmt.Fprintln(b, "\nDoes it add up?")
@@ -567,7 +584,7 @@ func spendingReport(year int, spends []spend, unread, cancelled []string, led le
 			}
 		}
 	}
-	fmt.Fprint(b, "\nDoorDash keeps no list of redeemed gift cards, so this is worked out from the receipts.")
+	fmt.Fprint(b, "\n"+sh.history)
 	return []string{monthsMsg, strings.TrimSpace(b.String())}
 }
 
@@ -591,7 +608,7 @@ var (
 // costcoDoordashCards finds the DoorDash gift cards among all the Costco
 // online orders the site still lists (about three years) and reads each
 // order's page for how many were bought and at what price.
-func (a *app) costcoDoordashCards(ctx context.Context) ([]costcoCards, error) {
+func (a *app) costcoGiftCards(ctx context.Context, card string) ([]costcoCards, error) {
 	real := a.out
 	a.out = &strings.Builder{} // a sign-in request here is not the owner's business in the middle of this report
 	ok, _, err := a.costcoWarehouse(ctx)
@@ -642,7 +659,7 @@ func (a *app) costcoDoordashCards(ctx context.Context) ([]costcoCards, error) {
 					}
 					when, err := time.Parse("01/02/2006", m[2])
 					low := strings.ToLower(chunk)
-					if err == nil && !got[m[1]] && strings.Contains(low, "doordash") && strings.Contains(low, "gift") {
+					if err == nil && !got[m[1]] && strings.Contains(low, card) && strings.Contains(low, "gift") {
 						got[m[1]] = true
 						orders = append(orders, order{m[1], when, dollars(m[3])})
 					}
@@ -669,7 +686,7 @@ func (a *app) costcoDoordashCards(ctx context.Context) ([]costcoCards, error) {
 			unit := 0.0
 			for i, line := range lines {
 				low := strings.ToLower(line)
-				if c.Each > 0 || !strings.Contains(low, "doordash") || !strings.Contains(low, "gift") {
+				if c.Each > 0 || !strings.Contains(low, card) || !strings.Contains(low, "gift") {
 					continue
 				}
 				for _, next := range lines[i+1 : min(i+6, len(lines))] { // the price of one pack follows its name

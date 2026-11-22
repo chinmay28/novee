@@ -144,7 +144,12 @@ const snapshotJS = `(() => {` + describe + `
       if (ctx) out[i].context = ctx.slice(0, 90);
     }
   }
-  const text = (root ? root.innerText : '').split('\n').map(__clean).filter(x => x).join('\n');
+  // What a frame of the same site shows (a receipt, say) is part of what the page says.
+  let raw = root ? root.innerText : '';
+  for (const f of (root || document).querySelectorAll('iframe')) {
+    try { if (f.offsetWidth > 50 && f.offsetHeight > 50 && f.contentDocument && f.contentDocument.body) raw += '\n' + f.contentDocument.body.innerText; } catch (e) {}
+  }
+  const text = raw.split('\n').map(__clean).filter(x => x).join('\n');
   return {title: document.title, url: location.href, text: text, elements: out, dialog: !!dlg,
     scrollY: Math.round(scrollY), height: document.documentElement.scrollHeight, viewH: innerHeight};
 })()`

@@ -87,7 +87,7 @@ func parseYears(args []string) (map[int]bool, string, error) {
 	return want, strings.Join(names, ","), nil
 }
 
-var storeName = map[string]string{"costco": "Costco", "doordash": "DoorDash"}
+var storeName = map[string]string{"costco": "Costco", "doordash": "DoorDash", "ubereats": "Uber Eats"}
 
 func (a *app) costcoYearPDF(ctx context.Context, args []string) (int, error) {
 	return a.yearPDF(ctx, "costco", args)
@@ -139,7 +139,7 @@ func (a *app) yearPDF(ctx context.Context, store string, args []string) (int, er
 		if ok, code, err := a.costcoWarehouse(ctx); !ok {
 			return code, err
 		}
-	} else if ok, code, err := a.signedIn(ctx, doordashOrders, name); !ok {
+	} else if ok, code, err := a.signedIn(ctx, shops[store].url(), name); !ok {
 		return code, err
 	}
 	logPath := filepath.Join(session.Dir(), "costco-job.log")
@@ -171,12 +171,10 @@ func costcoJobMain(arg string) int {
 	want, names, err := parseYears(strings.Split(years, ","))
 	if err == nil {
 		job.Years = names
-		if store == "doordash-spending" {
-			job.Store = "doordash"
-			job.save()
-			err = a.runDoordashSpending(ctx, job, want)
-		} else if store == "doordash" {
-			err = a.runDoordashJob(ctx, job, want)
+		if sh, spending := shops[strings.TrimSuffix(store, "-spending")], strings.HasSuffix(store, "-spending"); sh != nil && spending {
+			err = a.runShopSpending(ctx, sh, job, want)
+		} else if sh != nil {
+			err = a.runShopJob(ctx, sh, job, want)
 		} else {
 			err = a.runYearJob(ctx, job, want)
 		}

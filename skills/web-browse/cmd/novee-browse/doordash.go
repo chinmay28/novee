@@ -45,9 +45,14 @@ type ddOrder struct {
 	Total string
 	URL   string
 	Shop  string // the address of the store's own page, if the list links to it
+	// Cancelled is set when the list itself says so; such an order has no receipt worth opening.
+	Cancelled bool
 }
 
 func (o ddOrder) String() string {
+	if o.Cancelled {
+		return fmt.Sprintf("%s, %s, cancelled", o.Day.Format("01/02/2006"), o.Store)
+	}
 	return fmt.Sprintf("%s, %s, total %s", o.Day.Format("01/02/2006"), o.Store, o.Total)
 }
 
@@ -260,13 +265,21 @@ func yearArg(args []string, usage string) (int, error) {
 	return year, nil
 }
 
-// doordashReceipts lists the orders of a year.
 func (a *app) doordashReceipts(ctx context.Context, args []string) (int, error) {
-	year, err := yearArg(args, "usage: doordash-receipts [YEAR], for example: doordash-receipts 2025")
+	return a.shopReceipts(ctx, shops["doordash"], args)
+}
+
+func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
+	return a.shopReceipt(ctx, shops["doordash"], args)
+}
+
+// shopReceipts lists the orders of a year.
+func (a *app) shopReceipts(ctx context.Context, sh *shop, args []string) (int, error) {
+	year, err := yearArg(args, fmt.Sprintf("usage: %s-receipts [YEAR], for example: %s-receipts 2025", sh.key, sh.key))
 	if err != nil {
 		return exitError, err
 	}
-	orders, ok, code, err := a.ddList(ctx, year)
+	orders, ok, code, err := sh.list(a, ctx, year)
 	if !ok {
 		return code, err
 	}
@@ -279,19 +292,19 @@ func (a *app) doordashReceipts(ctx context.Context, args []string) (int, error) 
 		}
 	}
 	if n == 0 {
-		fmt.Fprintf(a.out, "Verdict: DoorDash's order history has no orders dated %d.\n", year)
+		fmt.Fprintf(a.out, "Verdict: the %s order history has no orders dated %d.\n", sh.name, year)
 		return exitOK, nil
 	}
-	fmt.Fprintf(a.out, "Verdict: %d DoorDash orders dated %d, newest first:\n%s", n, year, buf.String())
-	fmt.Fprintln(a.out, "To get one as text and PDF: novee-browse doordash-receipt MM/DD/YYYY")
+	fmt.Fprintf(a.out, "Verdict: %d %s orders dated %d, newest first:\n%s", n, sh.name, year, buf.String())
+	fmt.Fprintf(a.out, "To get one as text and PDF: novee-browse %s-receipt MM/DD/YYYY\n", sh.key)
 	return exitOK, nil
 }
 
-// doordashReceipt opens one order, prints its receipt, saves it as a PDF and
+// shopReceipt opens one order, prints its receipt, saves it as a PDF and
 // sends the PDF to the owner.
-func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
-	const usage = "usage: doordash-receipt last [YEAR]  or  doordash-receipt MM/DD/YYYY [STORE NAME]. Examples: doordash-receipt last, doordash-receipt 11/15/2026 mehak"
-	fs := flag.NewFlagSet("doordash-receipt", flag.ContinueOnError)
+func (a *app) shopReceipt(ctx context.Context, sh *shop, args []string) (int, error) {
+	usage := fmt.Sprintf("usage: %s-receipt last [YEAR]  or  %s-receipt MM/DD/YYYY [STORE NAME]. Examples: %s-receipt last, %s-receipt 11/15/2026 mehak", sh.key, sh.key, sh.key, sh.key)
+	fs := flag.NewFlagSet(sh.key+"-receipt", flag.ContinueOnError)
 	noSend := fs.Bool("no-send", false, "")
 	pos, err := parse(fs, args)
 	if err != nil || len(pos) == 0 {
@@ -320,7 +333,7 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 			}
 		}
 	}
-	orders, ok, code, err := a.ddList(ctx, year)
+	orders, ok, code, err := sh.list(a, ctx, year)
 	if !ok {
 		return code, err
 	}
@@ -343,7 +356,7 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 		if !day.IsZero() {
 			what = strings.TrimSpace("dated " + day.Format("01/02/2006") + " " + strings.Join(words, " "))
 		}
-		fmt.Fprintf(a.out, "Verdict: NOT FOUND. DoorDash's order history has no order %s. For the dates that exist run: novee-browse doordash-receipts %d\n", what, year)
+		fmt.Fprintf(a.out, "Verdict: NOT FOUND. The %s order history has no order %s. For the dates that exist run: novee-browse %s-receipts %d\n", sh.name, what, sh.key, year)
 		return exitOK, nil
 	case nth > len(match):
 		fmt.Fprintf(a.out, "Verdict: NOT FOUND. Only %d orders match on %s.\n", len(match), day.Format("01/02/2006"))
@@ -351,21 +364,21 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 	case nth > 0:
 		match = match[nth-1:]
 	case !day.IsZero() && len(match) > 1:
-		fmt.Fprintf(a.out, "Verdict: %d DoorDash orders on %s. Ask Chinmay which one, or use the command for the one he means:\n", len(match), day.Format("01/02/2006"))
+		fmt.Fprintf(a.out, "Verdict: %d %s orders on %s. Ask Chinmay which one, or use the command for the one he means:\n", len(match), sh.name, day.Format("01/02/2006"))
 		for i, o := range match {
-			fmt.Fprintf(a.out, "- %s -> novee-browse doordash-receipt %s %s #%d\n", o, day.Format("01/02/2006"), strings.Join(words, " "), i+1)
+			fmt.Fprintf(a.out, "- %s -> novee-browse %s-receipt %s %s #%d\n", o, sh.key, day.Format("01/02/2006"), strings.Join(words, " "), i+1)
 		}
 		return exitOK, nil
 	}
 	o := match[0]
 	return a.withPage(func(p *page.Page) (int, error) {
-		when, text, data, err := ddFetch(ctx, p, o)
+		when, text, data, err := sh.fetch(ctx, p, o)
 		if err != nil {
 			return exitError, err
 		}
 		which := "The"
 		if day.IsZero() {
-			which = fmt.Sprintf("The last DoorDash order of %d: the", year)
+			which = fmt.Sprintf("The last %s order of %d: the", sh.name, year)
 		}
 		desc := fmt.Sprintf("%s, %s, total %s", when.Format("01/02/2006 03:04pm"), o.Store, o.Total)
 		fmt.Fprintf(a.out, "Verdict: FOUND. %s receipt of %s.\n", which, desc)
@@ -376,11 +389,11 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			return exitError, err
 		}
-		path := filepath.Join(dir, "DoorDash-"+when.Format("2006-01-02_1504")+".pdf")
+		path := filepath.Join(dir, strings.ReplaceAll(sh.name, " ", "")+"-"+when.Format("2006-01-02_1504")+".pdf")
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			return exitError, err
 		}
-		if *noSend || notifyOwnerFile("DoorDash receipt, "+desc, path) != nil {
+		if *noSend || notifyOwnerFile(sh.name+" receipt, "+desc, path) != nil {
 			fmt.Fprintf(a.out, "The PDF was saved but NOT sent. Send it to Chinmay with the message tool.\nFile: %s\n", path)
 			return exitOK, nil
 		}
@@ -390,7 +403,7 @@ func (a *app) doordashReceipt(ctx context.Context, args []string) (int, error) {
 }
 
 // runDoordashJob fetches every order of the wanted years for the yearly PDFs.
-func (a *app) runDoordashJob(ctx context.Context, job *yearJob, want map[int]bool) error {
+func (a *app) runShopJob(ctx context.Context, sh *shop, job *yearJob, want map[int]bool) error {
 	since := 0
 	for y := range want {
 		if since == 0 || y < since {
@@ -399,12 +412,12 @@ func (a *app) runDoordashJob(ctx context.Context, job *yearJob, want map[int]boo
 	}
 	job.Phase = "reading the order history"
 	job.save()
-	orders, ok, _, err := a.ddList(ctx, since)
+	orders, ok, _, err := sh.list(a, ctx, since)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		return errors.New("DoorDash is not signed in. A sign-in link was sent; sign in and ask again")
+		return errors.New(sh.name + " is not signed in. A sign-in link was sent; sign in and ask again")
 	}
 	work := filepath.Join(session.Dir(), "costco-job")
 	_ = os.RemoveAll(work)
@@ -414,7 +427,7 @@ func (a *app) runDoordashJob(ctx context.Context, job *yearJob, want map[int]boo
 	defer os.RemoveAll(work)
 	var todo []ddOrder
 	for _, o := range orders {
-		if want == nil || want[o.Day.Year()] {
+		if (want == nil || want[o.Day.Year()]) && !o.Cancelled {
 			todo = append(todo, o)
 		}
 	}
@@ -434,7 +447,7 @@ func (a *app) runDoordashJob(ctx context.Context, job *yearJob, want map[int]boo
 				}
 				job.save()
 				session.Touch()
-				when, _, data, err := ddFetch(ctx, p, o)
+				when, _, data, err := sh.fetch(ctx, p, o)
 				if err != nil {
 					fmt.Fprintf(a.out, "round %d: could not fetch %s: %v\n", round, o, err)
 					again = append(again, o)
@@ -459,4 +472,38 @@ func (a *app) runDoordashJob(ctx context.Context, job *yearJob, want map[int]boo
 		return err
 	}
 	return a.sendYearPDFs(ctx, job, docs, failed, func(ds []doc) string { return fmt.Sprintf("%d orders", len(ds)) })
+}
+
+// shop is a site whose order history is read the same way: a list of orders,
+// a page per order, a receipt with a total and the credits used on it.
+type shop struct {
+	key, name string // "doordash", "DoorDash"
+	credit    string // what the site calls its stored money: "DoorDash credits", "Uber Cash"
+	short     string // the same in a few letters, for a line of figures: "credits", "Uber Cash"
+	card      string // the word that finds its gift cards in a Costco order: "doordash", "uber"
+	cardName  string // what those gift cards are called: "DoorDash", "Uber"
+	// priced is set when the credits come from gift cards and nothing else, so that
+	// their Costco price says what the credits cost. Uber Cash also comes from card
+	// benefits and promotions, and is not priced.
+	priced  bool
+	history string // the last line of the credits check: where a history would be, if anywhere
+	url     func() string
+	list    func(a *app, ctx context.Context, since int) ([]ddOrder, bool, int, error)
+	fetch   func(ctx context.Context, p *page.Page, o ddOrder) (time.Time, string, []byte, error)
+	spend   func(o ddOrder, when time.Time, text string) (spend, bool)
+	back    func(text string) float64                       // credits given back on a receipt
+	balance func(ctx context.Context, p *page.Page) float64 // credits left now; negative if unknown
+	store   func(ctx context.Context, p *page.Page, known map[string]storeInfo, name, url string) storeInfo
+}
+
+var shops = map[string]*shop{}
+
+func init() {
+	shops["doordash"] = &shop{key: "doordash", name: "DoorDash", credit: "DoorDash credits", short: "credits", card: "doordash", cardName: "DoorDash", priced: true,
+		history: "DoorDash keeps no list of redeemed gift cards, so this is worked out from the receipts.", url: doordashURL,
+		list: (*app).ddList, fetch: ddFetch, spend: ddSpend, back: creditsBack, balance: ddBalance, store: ddStore}
+	shops["ubereats"] = &shop{key: "ubereats", name: "Uber Eats", credit: "Uber Cash", short: "Uber Cash", card: "uber", cardName: "Uber",
+		history: "Uber Cash also comes from card benefits and promotions, not only gift cards, so it is not given a price here. Its activity in the Uber wallet is not read; this is worked out from the receipts.", url: ubereatsURL,
+		list: (*app).ueList, fetch: ueFetch, spend: ueSpend, back: func(string) float64 { return 0 },
+		balance: func(context.Context, *page.Page) float64 { return -1 }, store: ueStore}
 }

@@ -321,6 +321,31 @@ func (p *Page) pdf(ctx context.Context, content bool) ([]byte, error) {
 	return pdf, err
 }
 
+// OnlyFrame replaces the page by the document of its largest frame from the
+// same site, such as a receipt shown in a pop-up, so that printing gives
+// that document whole, on as many pages as it needs. It reports whether
+// there was one. The page is gone afterwards: load something else next.
+func (p *Page) OnlyFrame(ctx context.Context) (bool, error) {
+	var ok bool
+	err := p.eval(ctx, `(() => {
+  let best = null, area = 0;
+  for (const f of document.querySelectorAll('iframe')) {
+    try {
+      const a = f.offsetWidth * f.offsetHeight;
+      if (a > area && f.contentDocument && f.contentDocument.body && f.contentDocument.body.innerText.trim().length > 40) { best = f; area = a; }
+    } catch (e) {}
+  }
+  if (!best) return false;
+  const html = '<!doctype html>' + best.contentDocument.documentElement.outerHTML;
+  document.open(); document.write(html); document.close();
+  return true;
+})()`, &ok)
+	if err == nil && ok {
+		time.Sleep(700 * time.Millisecond) // pictures in it load again
+	}
+	return ok, err
+}
+
 // Hash changes the part of the address after "#" the way a link inside a
 // one-page site does: from, a pattern, is replaced by to. It returns false
 // when the address has no such part.

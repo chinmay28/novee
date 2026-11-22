@@ -114,6 +114,15 @@ For any question about amounts over many orders (spending, totals, averages, cre
 
 The answers read the same as Costco's (`Verdict:`, `PDF SENT`, `NOT sent`, `STARTED`, `BUSY`, `SIGN-IN LINK SENT`). A total of `$0.00` in the list is what DoorDash shows for an order paid together with another one; the receipt has the real amounts.
 
+## Uber Eats: the same, with `ubereats`
+
+- `novee-browse ubereats-receipt last` (or `last 2025`, or `11/11/2026`, with a store name if there were several that day): the receipt text and the PDF sent to Chinmay.
+- `novee-browse ubereats-receipts 2026`: every order of the year with date, store and total; cancelled orders are marked.
+- `novee-browse ubereats-year-pdf all` (or a year): one PDF per calendar year, by a background job.
+- `novee-browse ubereats-spending 2026`: the spending report, like DoorDash's. Here "spent" is the receipt total, split into what a card paid and what Uber Cash paid. Uber Cash is not given a gift card price, because it also comes from card benefits and promotions; Uber gift cards bought at Costco are listed.
+
+Signing in to Uber asks for a phone number or e-mail and then a code, not always a password. The tool sends Chinmay the sign-in link for that too.
+
 ## Examples
 
 Chinmay: "Open my Costco orders and tell me what my last warehouse trip cost."
