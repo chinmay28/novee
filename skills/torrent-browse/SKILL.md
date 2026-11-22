@@ -45,6 +45,7 @@ Options for search, check, grab and watch: `--quality 1080p`, `--min-seeds 5`, `
 
 - Start from the `Verdict:` line. Copy names, sizes and numbers exactly.
 - A search: show the top 3 to 5 lines with their numbers, say which looks best (most seeders; among those, the size that fits what he asked for), and ask which he wants, unless he already said.
+- "The 2160p ones", "one per part", "all parts of the series": run `search NAME --quality 2160p` (or the quality he names). A search reads every page of the site's results, but its output shows only the first 20 by seeders, so a less seeded part can be hidden until you narrow it. Before saying a part or a quality is not there, run that narrowed search.
 - "Is X available yet?": run `check X`. If the answer is `NOT AVAILABLE YET`, offer to watch for it (`watch add X`).
 - "Get me X": if he was specific, `grab X` (add `--quality` if he named one). If several different things match, `search X` and ask.
 - "All of these", "the whole season", "every one": `search` first, then `get` with the numbers or `get --top K`. At most 25 files at once.

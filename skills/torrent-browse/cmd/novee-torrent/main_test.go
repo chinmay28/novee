@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -88,10 +89,16 @@ func tracker() http.Handler {
 		b.WriteString(`<title>Browse</title><main><table><tr><th>Name</th><th>DL</th><th>Size</th><th>S</th><th>L</th></tr>
 <tr><td><a href="/index.php?page=torrent-details&id=aa11">Featured Ubuntu Remix</a></td><td><a href="/download.php?id=1">DL</a></td><td>80 GB</td><td>999</td><td>0</td></tr></table>`)
 		b.WriteString(`<table><tr><th>Type</th><th>Name</th><th>DL</th><th>AddDate ↓</th><th>Size</th><th><img alt="Snatched" src="x"></th><th>S</th><th><img title="Leechers" src="x"></th></tr>`)
+		pageNo, _ := strconv.Atoi(r.URL.Query().Get("pages"))
+		shown, matched := 0, 0
 		for _, t := range catalogue {
 			if !strings.Contains(strings.ToLower(t.name), q) {
 				continue
 			}
+			if matched++; matched <= pageNo*3 || shown == 3 { // three to a page
+				continue
+			}
+			shown++
 			dl := fmt.Sprintf(`<a href="/download.php?id=%d">DL</a>`, t.id)
 			if t.magnet {
 				dl = `<a href="magnet:?xt=urn:btih:abc">M</a>`
@@ -99,7 +106,11 @@ func tracker() http.Handler {
 			fmt.Fprintf(b, `<tr><td>Apps</td><td><a href="/index.php?page=torrent-details&id=e%dc154647">%s</a> <a href="/index.php?page=userdetails&id=255718">an-uploader-with-a-long-name-to-outweigh-the-title</a></td><td>%s</td><td>May 04, 2026</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>`,
 				t.id, t.name, dl, t.size, t.snatched, t.seeds, t.leech)
 		}
-		b.WriteString(`</table></main>`)
+		b.WriteString(`</table>`)
+		if matched > (pageNo+1)*3 {
+			fmt.Fprintf(b, `<a href="/browse.php?search=%s&active=1&pages=%d">Next &gt;&gt;</a>`, url.QueryEscape(q), pageNo+1)
+		}
+		b.WriteString(`</main>`)
 		fmt.Fprint(w, b.String())
 	})
 	mux.HandleFunc("/download.php", func(w http.ResponseWriter, r *http.Request) {
@@ -206,7 +217,7 @@ func TestTorrentTool(t *testing.T) {
 
 	// A search through the site's own box: columns named by words, letters and pictures, best seeded first.
 	_, got = run("search", "ubuntu")
-	wants(got, "Verdict: 4 results", "most seeders first",
+	wants(got, "Verdict: 4 results", "every page of the results was read", "most seeders first",
 		"1. Ubuntu 26.04 Server amd64 | 2.1 GB | 310 seeders, 4 leechers | completed 9000 times | added May 04, 2026",
 		"2. Ubuntu Studio 26.04 | 6.5 GB | 45 seeders, 0 leechers | completed 300 times | added May 04, 2026 | Apps | magnet link only",
 		"4. Ubuntu 24.04 Desktop amd64 | 4.9 GB | 0 seeders, 1 leechers")
@@ -218,7 +229,7 @@ func TestTorrentTool(t *testing.T) {
 		t.Error("search words must never be typed into a chat box")
 	}
 	// A wrong remembered address (the site answers it with its front page) is noticed and replaced.
-	cfg.Search = "/torrents?name={q}"
+	cfg.Search, cfg.Box = "/torrents?name={q}", false // an address that was guessed, not learned from the site
 	_ = saveJSON(configPath(), cfg)
 	_, got = run("search", "debian")
 	wants(got, "Verdict: 1 results", "Debian 14 netinst")

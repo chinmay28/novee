@@ -61,6 +61,10 @@ type config struct {
 	Site   string `json:"site"`   // https://tracker.example
 	Search string `json:"search"` // address of a search with {q} where the words go; learned on first use
 	Latest string `json:"latest"` // address of the list of newest torrents; learned on first use
+	// Box is set when Search was learned from the site's own search box. Its
+	// results are the site's answer and are taken as they come; an address that
+	// was only guessed has to prove itself by results that contain the words.
+	Box bool `json:"box"`
 }
 
 type options struct {
@@ -83,6 +87,8 @@ type tool struct {
 	// open loads an address in Novee's browser and returns what novee-browse
 	// printed: the page, or word that a sign-in link went out.
 	open func(ctx context.Context, url string) (string, error)
+	// boxed is set when this run's results came from the site's own search box.
+	boxed bool
 }
 
 func dataDir() string {
@@ -227,11 +233,15 @@ func lock(ctx context.Context) (func(), error) {
 	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
 }
 
+// maxPages is how many pages of a result list are read: a site shows a
+// dozen or two per page, and what is asked for may be on the last one.
+const maxPages = 10
+
 // errSaid means the reason was already printed.
 var errSaid = errors.New("said")
 
 func parseOptions(args []string) (options, error) {
-	o := options{sort: "seeds", limit: 15, pages: 1}
+	o := options{sort: "seeds", limit: 20, pages: maxPages}
 	list := func(s string) []string {
 		return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' })
 	}
@@ -307,8 +317,8 @@ func parseOptions(args []string) (options, error) {
 	if o.limit == 0 || o.limit > 50 {
 		o.limit = 50
 	}
-	if o.pages < 1 || o.pages > 5 {
-		o.pages = 1
+	if o.pages < 1 || o.pages > maxPages {
+		o.pages = maxPages
 	}
 	return o, nil
 }
@@ -424,7 +434,7 @@ var (
 	commonSearch = []string{"/torrents.php?searchstr={q}", "/browse.php?search={q}", "/torrents.php?search={q}", "/torrents?name={q}",
 		"/torrents?search={q}", "/search?q={q}", "/search/{q}", "/index.php?page=torrents&search={q}", "/t?q={q}"}
 	commonLatest = []string{"/torrents.php", "/browse.php", "/torrents", "/latest", "/index.php?page=torrents", "/"}
-	nextPage     = regexp.MustCompile(`(?i)^(next|next page|next »|next ›|›|»|>|>>|→)$`)
+	nextPage     = regexp.MustCompile(`(?i)^(next\b.{0,12}|›|»|>|>>|→)$`)
 )
 
 func (t *tool) abs(path string) string {
@@ -542,7 +552,7 @@ func (t *tool) find(ctx context.Context, words string, pages int) (*page.Page, l
 	learn := func(l listing) {
 		for _, enc := range []string{url.QueryEscape(words), url.PathEscape(words), strings.ReplaceAll(words, " ", "+")} {
 			if i := strings.Index(strings.ToLower(l.URL), strings.ToLower(enc)); i >= 0 {
-				t.cfg.Search = l.URL[:i] + "{q}" + l.URL[i+len(enc):]
+				t.cfg.Search, t.cfg.Box = l.URL[:i]+"{q}"+l.URL[i+len(enc):], true
 				_ = saveJSON(configPath(), t.cfg)
 				return
 			}
@@ -563,13 +573,10 @@ func (t *tool) find(ctx context.Context, words string, pages int) (*page.Page, l
 		}
 	}
 	if ok { // the site's own search answered: what it says stands, results or none
-		if relevant(l.Hits, words) {
+		if len(l.Hits) > 0 {
 			learn(l)
 		}
-		if len(l.Hits) == 0 || relevant(l.Hits, words) {
-			return p, l, nil
-		}
-		l.Hits = nil // a list that has nothing to do with the words is not an answer
+		t.boxed = true
 		return p, l, nil
 	}
 	for _, tmpl := range commonSearch {
@@ -583,7 +590,7 @@ func (t *tool) find(ctx context.Context, words string, pages int) (*page.Page, l
 		if err != nil || !relevant(l.Hits, words) {
 			continue
 		}
-		t.cfg.Search = tmpl
+		t.cfg.Search, t.cfg.Box = tmpl, false
 		_ = saveJSON(configPath(), t.cfg)
 		return p, l, nil
 	}
@@ -627,7 +634,8 @@ func (t *tool) results(ctx context.Context, o options) (*page.Page, []hit, int, 
 	t.plain(&o)
 	words := strings.Join(o.words, " ")
 	p, l, err := t.find(ctx, words, o.pages)
-	if err == nil && len(l.Hits) > 0 && !relevant(l.Hits, words) && t.cfg.Search != "" {
+	trusted := func() bool { return t.boxed || (t.cfg.Search != "" && t.cfg.Box) }
+	if err == nil && len(l.Hits) > 0 && !relevant(l.Hits, words) && t.cfg.Search != "" && !trusted() {
 		// The remembered search address gives lists that ignore the words: it was wrong. Work it out again.
 		t.cfg.Search = ""
 		_ = saveJSON(configPath(), t.cfg)
@@ -636,6 +644,8 @@ func (t *tool) results(ctx context.Context, o options) (*page.Page, []hit, int, 
 	if err != nil {
 		return nil, nil, 0, err
 	}
+	// A page with no results still shows its other lists (featured, newest): rows
+	// that mention none of the words are not an answer, whoever served them.
 	if !relevant(l.Hits, words) {
 		l.Hits = nil
 	}
@@ -684,9 +694,9 @@ func (t *tool) search(ctx context.Context, args []string) error {
 		return nil
 	}
 	by := map[string]string{"seeds": "most seeders first", "size": "largest first", "small": "smallest first", "new": "in the site's order", "name": "by name"}[o.sort]
-	fmt.Fprintf(t.out, "Verdict: %d results for %s on %s, %s", total, describe(o), t.cfg.Site, by)
+	fmt.Fprintf(t.out, "Verdict: %d results for %s on %s (every page of the results was read), %s", total, describe(o), t.cfg.Site, by)
 	if total > len(hits) {
-		fmt.Fprintf(t.out, " (the first %d shown)", len(hits))
+		fmt.Fprintf(t.out, ". The first %d are shown; to see the rest narrow it down, for example with --quality 2160p, or raise --limit", len(hits))
 	}
 	fmt.Fprintln(t.out, ":")
 	t.list(hits)
