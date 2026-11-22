@@ -1,0 +1,7 @@
+[Unit]
+Description=Novee: check the torrent site for what is being watched for
+
+[Service]
+Type=oneshot
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/novee-torrent watch run

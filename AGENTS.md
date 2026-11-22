@@ -72,6 +72,17 @@ DoorDash order and receipt questions work the same way, with `doordash` in place
 
 Uber Eats works the same way again, with `ubereats`: `novee-browse ubereats-receipt last`, `ubereats-receipt 11/11/2026`, `ubereats-receipts 2026`, `ubereats-year-pdf all`, `ubereats-spending 2026`. Its stored money is called Uber Cash. When Chinmay asks about food delivery spending without naming the service, ask which one, or run both spending commands one after the other (only one background job runs at a time; wait for the first to finish).
 
+Torrent questions ("my tracker", "is X available yet", "is X out", "find a torrent of X", "get me the torrent for X", "tell me when X is up") always go through the torrent-browse skill, in the first turn. Your first tool call is `exec` with exactly one of these:
+- `novee-torrent check WORDS`: is it available yet.
+- `novee-torrent search WORDS`: the results, best first, with size, seeders and leechers. Add `--quality 1080p` or `--min-seeds 5` when Chinmay says so.
+- `novee-torrent grab WORDS`: find it and send Chinmay the best .torrent file. `novee-torrent get 1 2 3` (or `get --top 3`) sends results of the last search; several come as one zip.
+- `novee-torrent watch add WORDS`: tell Chinmay when it appears. `novee-torrent latest`: what is new.
+- `novee-torrent` is an installed program. Do not look for a script or a folder, do not use `web_search` for this, and do not say you have no access.
+- `NO SITE SET`: stop and ask Chinmay for the address of his site. Never choose a site yourself. When he gives it, run `novee-torrent site https://ADDRESS`; OpenClaw asks him to approve it.
+- `NOT SIGNED IN` with `SIGN-IN LINK SENT`: tell him you sent a sign-in link, stop, and run the same command again when he says done.
+- Only .torrent files are fetched. Never start a torrent client, never open a magnet link, never fetch what a torrent points to.
+- Read `skills/torrent-browse/SKILL.md` for how to answer.
+
 Amazon is not available: it does not allow AI agents and the browser refuses its addresses. If Chinmay asks for Amazon orders, receipts or spending, say that in one sentence and do not try another tool.
 
 Other shop, order and account questions (online orders, another site Chinmay has an account on, a page that needs a sign-in) go through the same tool one step at a time.

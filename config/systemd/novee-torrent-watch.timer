@@ -1,0 +1,10 @@
+[Unit]
+Description=Novee: check the torrent site a few times a day
+
+[Timer]
+OnCalendar=*-*-* 01,07,13,19:40:00
+RandomizedDelaySec=20m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

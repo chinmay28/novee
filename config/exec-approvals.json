@@ -257,6 +257,22 @@
      "argPattern": "^(?!.*--yes)(open|snapshot|read|find|scroll|back|click|type|select|screenshot|pdf|status|close|login-request|download|(costco|doordash|ubereats)-(receipts?|year-pdf|spending))( .*)?$"
     },
     {
+     "pattern": "novee-torrent",
+     "argPattern": "^(site$|(?!site\\b)[a-z-]+( .*)?$)"
+    },
+    {
+     "pattern": "/home/chinmay/.local/bin/novee-torrent",
+     "argPattern": "^(site$|(?!site\\b)[a-z-]+( .*)?$)"
+    },
+    {
+     "pattern": "novee-browse",
+     "argPattern": "^torrent[- ](site$|(?!site\\b)[a-z-]+( .*)?$)"
+    },
+    {
+     "pattern": "/home/chinmay/.local/bin/novee-browse",
+     "argPattern": "^torrent[- ](site$|(?!site\\b)[a-z-]+( .*)?$)"
+    },
+    {
      "pattern": "openclaw",
      "argPattern": "^(status|health|channels status|skills list|models list|config get|sessions list|--version|logs)( .*)?$"
     }

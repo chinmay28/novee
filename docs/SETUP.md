@@ -165,6 +165,25 @@ What the guard does and does not do: it stops before clicks and form submissions
 
 Settings: `NOVEE_BROWSE_DIR` (session file, screenshots, saved pages; default `~/.local/share/novee/browse`), `NOVEE_BROWSE_IDLE_MINUTES`, `NOVEE_BROWSE_ALLOW_LAN=1`, `NOVEE_BROWSE_HEADLESS=1`, `NOVEE_BROWSE_VIEW_PORT`, `NOVEE_BROWSE_VIEW_HOST`, `NOVEE_BROWSE_NOTIFY_CMD` (a program that gets the sign-in message as its argument, instead of `openclaw message send`).
 
+## 10. torrent-browse
+
+A second Go program on the web-browse packages; build it after web-browse.
+
+```bash
+cd ~/.openclaw/workspace/skills/torrent-browse
+go test ./... && go build -o ~/.local/bin/novee-torrent ./cmd/novee-torrent
+cp ../../config/systemd/novee-torrent-watch.* ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now novee-torrent-watch.timer
+```
+
+Apply `config/exec-approvals.json` again (section 7). It lets Novee run every `novee-torrent` command except setting the site: `novee-torrent site https://ADDRESS` asks the owner in Telegram, because a small model left to itself once picked a site of its own. The owner names the site once; the address is kept in `~/.config/novee/torrent.json` on the VM and is not in the repository.
+
+It searches through the web-browse browser, so signing in is the same link as for any site. It reads a site's result table without being told the site: the rows that hold a link to a `.torrent` file, with the columns named from the header (words, single letters or the titles of little pictures); the first search finds the site's search box or tries the usual addresses and remembers what worked. A site with an unusual layout may need its search address put into `torrent.json` by hand (`"search": "/path?query={q}"`).
+
+Only `.torrent` files are fetched: what a site sends is kept only if it is a small bencoded torrent file, magnet links are not followed, and nothing here runs a torrent client. One file is sent as it is, several as one zip, 25 at most at a time. `watch add` keeps a search and the timer repeats it four times a day until it has a seeded result.
+
+Settings: `NOVEE_TORRENT_DIR` (config and data in one folder, for tests), `NOVEE_TORRENT_NOTIFY_CMD`.
+
 ## Tests
 
 ```bash
@@ -172,6 +191,7 @@ python3 skills/repo-sync/tests/test_reposync.py
 python3 skills/vbox-manage/tests/test_novee_vbox.py
 (cd skills/receipts && go test ./...)
 (cd skills/web-browse && go test ./...)
+(cd skills/torrent-browse && go test ./...)
 ```
 
 The second file checks the host helper's argument handling, the `--yes` and protected-VM guards and the SSH config entries against a fake VirtualBox. The first runs every sync case (pull, push, merge, conflict, privacy block, failed push) against a throwaway local remote. The Go tests cover the receipt parser, the search and the store, and drive a real browser against a fake shop (sign-in missing, sign-in present, a field the shop rejects, expiry); that last test is skipped when no browser is installed. The web-browse tests cover the approval rules and run every command against a fake shop in a real browser, checking that an unapproved "Place order" click reaches nothing, and that a sign-in request sends the link to the owner and not to the model, refuses a wrong token, passes typing on to the page and stops working after Done. They run headless; `NOVEE_BROWSE_TEST_VIRTUAL=1 go test ./...` runs them on a virtual screen.

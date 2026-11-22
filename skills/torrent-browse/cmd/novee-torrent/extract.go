@@ -1,0 +1,214 @@
+package main
+
+import (
+	"fmt"
+	"regexp"
+	"sort"
+	"strconv"
+	"strings"
+)
+
+// hit is one torrent in a list of results.
+type hit struct {
+	Name     string `json:"name"`
+	Details  string `json:"details"`  // address of its page
+	Download string `json:"download"` // address of its .torrent file
+	Magnet   bool   `json:"magnet"`   // the row offers only a magnet link
+	Size     string `json:"size"`
+	Seeds    int    `json:"seeds"` // -1 when the site does not say
+	Leech    int    `json:"leech"`
+	Snatched int    `json:"snatched"`
+	Added    string `json:"added"`
+	Category string `json:"category"`
+	Free     bool   `json:"free"`
+}
+
+// listing is what a results page says.
+type listing struct {
+	Title    string `json:"title"`
+	URL      string `json:"url"`
+	Password bool   `json:"password"` // the page asks for a sign-in
+	Hits     []hit  `json:"hits"`
+}
+
+// extractJS reads a torrent site's list of results without knowing the site.
+//
+// Every such list is rows that each hold a link to a .torrent file (or to the
+// torrent's page), a size, and counts of seeders and leechers under headings
+// that say so in words, letters or little pictures. So: find the download
+// links, take the row around each, name the columns from the header row, and
+// where a header says nothing fall back on what the cells look like.
+const extractJS = `(() => {
+  const clean = s => (s || '').replace(/\s+/g, ' ').trim();
+  const dlRe = /(download\.php|\/download\/|\/download\?|\/dl\/|\.torrent(\?|$)|action=download|torrents\/download|\/get\/)/i;
+  const detRe = /(details?\.php|torrents?\.php\?.*\bid=|[?&]id=\d+|\/torrents?\/\d+|\/torrent\/[^/]+|\/t\/\d+|\/details\/)/i;
+  const sizeRe = /(\d+(?:[.,]\d+)?)\s*(bytes|B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)\b/i;
+  const rowOf = a => a.closest('tr') || a.closest('li, article, [class*=torrent], [class*=result], [class*=row]');
+  const rows = new Map();
+  for (const a of document.querySelectorAll('a[href]')) {
+    const h = a.getAttribute('href') || '';
+    if (dlRe.test(h) && !/^magnet:/i.test(h)) { const r = rowOf(a); if (r && !rows.has(r)) rows.set(r, {dl: a}); }
+  }
+  for (const a of document.querySelectorAll('a[href^="magnet:"]')) { const r = rowOf(a); if (r && !rows.has(r)) rows.set(r, {magnet: true}); }
+  if (rows.size === 0) // no download links in the list: rows that link to a torrent's page and state a size
+    for (const a of document.querySelectorAll('a[href]')) {
+      if (!detRe.test(a.getAttribute('href') || '')) continue;
+      const r = rowOf(a); if (r && !rows.has(r) && sizeRe.test(r.innerText || '')) rows.set(r, {});
+    }
+  // What a header cell is about: its text, or the title or alt of the picture in it.
+  const label = c => clean([c.innerText, c.getAttribute('title'), c.getAttribute('aria-label'),
+    ...Array.from(c.querySelectorAll('[title],[alt],[aria-label]')).map(e => e.getAttribute('title') || e.getAttribute('alt') || e.getAttribute('aria-label')),
+    ...Array.from(c.querySelectorAll('[class]')).map(e => e.className && e.className.baseVal === undefined ? e.className : '')].join(' ')).toLowerCase();
+  const headers = new Map();
+  const colsOf = table => {
+    if (headers.has(table)) return headers.get(table);
+    const m = {};
+    const head = table.querySelector('thead tr') || Array.from(table.querySelectorAll('tr')).find(r => r.querySelector('th')) || table.querySelector('tr');
+    if (head) Array.from(head.children).forEach((c, i) => {
+      const t = label(c), w = clean(c.innerText).toLowerCase();
+      const set = k => { if (m[k] === undefined) m[k] = i; };
+      if (/seed|\bup\b|uploaders|arrow-?up|▲|↑/.test(t) || w === 's' || w === 'se') set('seeds');
+      else if (/leech|peers|\bdown\b|downloaders|arrow-?down|▼|↓/.test(t) || w === 'l' || w === 'le') set('leech');
+      else if (/snatch|complet|grabs|times|downloaded|finished|\bcheck/.test(t) || w === 'c') set('snatched');
+      else if (/size/.test(t)) set('size');
+      else if (/added|age|date|uploaded|\btime\b|when/.test(t)) set('added');
+      else if (/categ|\btype\b|\bcat\b/.test(t)) set('category');
+      else if (/name|title|torrent/.test(t)) set('name');
+    });
+    headers.set(table, m); return m;
+  };
+  const int = s => { const m = clean(s).replace(/[,.\s](?=\d{3}\b)/g, '').match(/^\d+$/); return m ? parseInt(m[0], 10) : -1; };
+  const hits = [];
+  for (const [row, how] of rows) {
+    if (row.querySelector('th') && !row.querySelector('td')) continue;
+    const cells = Array.from(row.children), table = row.closest('table'), cols = table ? colsOf(table) : {};
+    const cell = k => cols[k] !== undefined && cells[cols[k]] ? cells[cols[k]] : null;
+    // The name is the longest link text that leads to the torrent's own page.
+    let name = '', details = '';
+    for (const a of row.querySelectorAll('a[href]')) {
+      const h = a.getAttribute('href') || '', t = clean(a.innerText || a.getAttribute('title'));
+      if (dlRe.test(h) || /^magnet:/i.test(h) || t.length < 3) continue;
+      const weight = t.length + (detRe.test(h) ? 1000 : 0);
+      if (weight > (name.length + (details && detRe.test(details) ? 1000 : 0))) { name = t; details = a.href; }
+    }
+    if (!name) continue;
+    let size = '';
+    const sc = cell('size');
+    if (sc && sizeRe.test(sc.innerText)) size = clean(sc.innerText.match(sizeRe)[0]);
+    else for (const c of cells) { const m = (c.innerText || '').match(sizeRe); if (m && clean(c.innerText).length < 20) { size = clean(m[0]); break; } }
+    let seeds = cell('seeds') ? int(cell('seeds').innerText) : -1, leech = cell('leech') ? int(cell('leech').innerText) : -1;
+    if (seeds < 0 && cols.seeds === undefined) { // no header says: the bare numbers after the size are seeders, then leechers
+      const nums = cells.map(c => int(c.innerText)), from = cells.findIndex(c => sizeRe.test(c.innerText || '') && clean(c.innerText).length < 20);
+      const after = nums.slice(from + 1).filter(n => n >= 0);
+      if (from >= 0 && after.length >= 2) { seeds = after[after.length - 2]; leech = after[after.length - 1]; }
+    }
+    const cat = cell('category');
+    hits.push({name: name.slice(0, 200), details: details, download: how.dl ? how.dl.href : '', magnet: !!how.magnet && !how.dl, size: size,
+      seeds: seeds, leech: leech, snatched: cell('snatched') ? int(cell('snatched').innerText) : -1,
+      added: cell('added') ? clean(cell('added').innerText).slice(0, 40) : '',
+      category: cat ? clean(cat.innerText || (cat.querySelector('[alt],[title]') || {getAttribute: () => ''}).getAttribute('alt') || (cat.querySelector('[title]') || {getAttribute: () => ''}).getAttribute('title')).slice(0, 40) : '',
+      free: /free\s?leech|\bfreeleech\b|\b100% free\b|class="[^"]*\bfree\b/i.test(row.outerHTML)});
+  }
+  const password = Array.from(document.querySelectorAll('input[type=password]')).some(e => e.offsetParent !== null);
+  return {title: document.title, url: location.href, password: password, hits: hits};
+})()`
+
+var sizeUnit = regexp.MustCompile(`(?i)^(\d+(?:[.,]\d+)?)\s*(bytes|B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$`)
+
+// bytesOf turns "4.3 GB" into a number to sort by.
+func bytesOf(size string) float64 {
+	m := sizeUnit.FindStringSubmatch(strings.TrimSpace(size))
+	if m == nil {
+		return 0
+	}
+	v, _ := strconv.ParseFloat(strings.Replace(m[1], ",", ".", 1), 64)
+	switch strings.ToLower(m[2])[:1] {
+	case "k":
+		v *= 1 << 10
+	case "m":
+		v *= 1 << 20
+	case "g":
+		v *= 1 << 30
+	case "t":
+		v *= 1 << 40
+	}
+	return v
+}
+
+// filter keeps the hits that have every word in must, none in exclude, and enough seeders.
+func filter(hits []hit, must, exclude []string, minSeeds int) []hit {
+	var out []hit
+next:
+	for _, h := range hits {
+		low := strings.ToLower(h.Name)
+		for _, w := range must {
+			if !strings.Contains(low, strings.ToLower(w)) {
+				continue next
+			}
+		}
+		for _, w := range exclude {
+			if strings.Contains(low, strings.ToLower(w)) {
+				continue next
+			}
+		}
+		if h.Seeds >= 0 && h.Seeds < minSeeds {
+			continue
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+// rank orders hits: by "seeds" (the default; most seeders first, then most
+// completed downloads), "size" (largest first), "small" (smallest first),
+// "new" (as the site listed them) or "name".
+func rank(hits []hit, by string) {
+	switch by {
+	case "new":
+	case "size":
+		sort.SliceStable(hits, func(i, j int) bool { return bytesOf(hits[i].Size) > bytesOf(hits[j].Size) })
+	case "small":
+		sort.SliceStable(hits, func(i, j int) bool { return bytesOf(hits[i].Size) < bytesOf(hits[j].Size) })
+	case "name":
+		sort.SliceStable(hits, func(i, j int) bool { return strings.ToLower(hits[i].Name) < strings.ToLower(hits[j].Name) })
+	default:
+		sort.SliceStable(hits, func(i, j int) bool {
+			if hits[i].Seeds != hits[j].Seeds {
+				return hits[i].Seeds > hits[j].Seeds
+			}
+			return hits[i].Snatched > hits[j].Snatched
+		})
+	}
+}
+
+// line is how a hit reads in a list.
+func (h hit) line() string {
+	parts := []string{h.Name}
+	if h.Size != "" {
+		parts = append(parts, h.Size)
+	}
+	switch {
+	case h.Seeds >= 0 && h.Leech >= 0:
+		parts = append(parts, fmt.Sprintf("%d seeders, %d leechers", h.Seeds, h.Leech))
+	case h.Seeds >= 0:
+		parts = append(parts, fmt.Sprintf("%d seeders", h.Seeds))
+	default:
+		parts = append(parts, "seeders not shown")
+	}
+	if h.Snatched >= 0 {
+		parts = append(parts, fmt.Sprintf("completed %d times", h.Snatched))
+	}
+	if h.Added != "" {
+		parts = append(parts, "added "+h.Added)
+	}
+	if h.Category != "" {
+		parts = append(parts, h.Category)
+	}
+	if h.Free {
+		parts = append(parts, "freeleech")
+	}
+	if h.Magnet {
+		parts = append(parts, "magnet link only, no .torrent file")
+	}
+	return strings.Join(parts, " | ")
+}
