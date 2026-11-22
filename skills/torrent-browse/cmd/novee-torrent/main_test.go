@@ -87,7 +87,7 @@ func tracker() http.Handler {
 		// Above the results, a short list of featured torrents that has nothing to do with the search.
 		b.WriteString(`<title>Browse</title><main><table><tr><th>Name</th><th>DL</th><th>Size</th><th>S</th><th>L</th></tr>
 <tr><td><a href="/index.php?page=torrent-details&id=aa11">Featured Ubuntu Remix</a></td><td><a href="/download.php?id=1">DL</a></td><td>80 GB</td><td>999</td><td>0</td></tr></table>`)
-		b.WriteString(`<table><tr><th>Type</th><th>Name</th><th>DL</th><th>Size</th><th><img alt="Snatched" src="x"></th><th>S</th><th><img title="Leechers" src="x"></th></tr>`)
+		b.WriteString(`<table><tr><th>Type</th><th>Name</th><th>DL</th><th>AddDate ↓</th><th>Size</th><th><img alt="Snatched" src="x"></th><th>S</th><th><img title="Leechers" src="x"></th></tr>`)
 		for _, t := range catalogue {
 			if !strings.Contains(strings.ToLower(t.name), q) {
 				continue
@@ -96,7 +96,7 @@ func tracker() http.Handler {
 			if t.magnet {
 				dl = `<a href="magnet:?xt=urn:btih:abc">M</a>`
 			}
-			fmt.Fprintf(b, `<tr><td>Apps</td><td><a href="/index.php?page=torrent-details&id=e%dc154647">%s</a> <a href="/index.php?page=userdetails&id=255718">an-uploader-with-a-long-name-to-outweigh-the-title</a></td><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>`,
+			fmt.Fprintf(b, `<tr><td>Apps</td><td><a href="/index.php?page=torrent-details&id=e%dc154647">%s</a> <a href="/index.php?page=userdetails&id=255718">an-uploader-with-a-long-name-to-outweigh-the-title</a></td><td>%s</td><td>May 04, 2026</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>`,
 				t.id, t.name, dl, t.size, t.snatched, t.seeds, t.leech)
 		}
 		b.WriteString(`</table></main>`)
@@ -207,8 +207,8 @@ func TestTorrentTool(t *testing.T) {
 	// A search through the site's own box: columns named by words, letters and pictures, best seeded first.
 	_, got = run("search", "ubuntu")
 	wants(got, "Verdict: 4 results", "most seeders first",
-		"1. Ubuntu 26.04 Server amd64 | 2.1 GB | 310 seeders, 4 leechers | completed 9000 times",
-		"2. Ubuntu Studio 26.04 | 6.5 GB | 45 seeders, 0 leechers | completed 300 times | Apps | magnet link only",
+		"1. Ubuntu 26.04 Server amd64 | 2.1 GB | 310 seeders, 4 leechers | completed 9000 times | added May 04, 2026",
+		"2. Ubuntu Studio 26.04 | 6.5 GB | 45 seeders, 0 leechers | completed 300 times | added May 04, 2026 | Apps | magnet link only",
 		"4. Ubuntu 24.04 Desktop amd64 | 4.9 GB | 0 seeders, 1 leechers")
 	var cfg config
 	if !loadJSON(configPath(), &cfg) || !strings.Contains(cfg.Search, "browse.php?search={q}&active=1") {

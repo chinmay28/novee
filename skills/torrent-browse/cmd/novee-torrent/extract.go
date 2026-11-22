@@ -70,11 +70,12 @@ const extractJS = `((WORDS) => {
     if (head) Array.from(head.children).forEach((c, i) => {
       const t = label(c), w = clean(c.innerText).toLowerCase();
       const set = k => { if (m[k] === undefined) m[k] = i; };
-      if (/seed|\bup\b|uploaders|arrow-?up|▲|↑/.test(t) || w === 's' || w === 'se') set('seeds');
-      else if (/leech|peers|\bdown\b|downloaders|arrow-?down|▼|↓/.test(t) || w === 'l' || w === 'le') set('leech');
-      else if (/snatch|complet|grabs|times|downloaded|finished|\bcheck/.test(t) || w === 'c') set('snatched');
+      // A date column first: its header often carries a sort arrow, which says nothing about peers.
+      if (/added|adddate|age|date|uploaded|\btime\b|when/.test(t)) set('added');
       else if (/size/.test(t)) set('size');
-      else if (/added|age|date|uploaded|\btime\b|when/.test(t)) set('added');
+      else if (/seed|\bup\b|uploaders|arrow-?up/.test(t) || ['s', 'se', '▲', '↑'].includes(w)) set('seeds');
+      else if (/leech|peers|\bdown\b|downloaders|arrow-?down/.test(t) || ['l', 'le', '▼', '↓'].includes(w)) set('leech');
+      else if (/snatch|complet|grabs|times|downloaded|finished|\bcheck/.test(t) || w === 'c') set('snatched');
       else if (/categ|\btype\b|\bcat\b/.test(t)) set('category');
       else if (/name|title|torrent/.test(t)) set('name');
     });
