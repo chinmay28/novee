@@ -46,6 +46,14 @@ var catalogue = []row{
 	{3, "Ubuntu 24.04 Desktop amd64", "4.9 GB", 0, 1, 77, false},
 	{4, "Ubuntu Studio 26.04", "6.5 GB", 45, 0, 300, true},
 	{5, "Debian 14 netinst", "780 MB", 88, 2, 1200, false},
+	// A series: four parts, the third not in 2160p, plus a 3D version that is not a part.
+	{6, "Space Saga 2008 2160p UHD BluRay", "40 GB", 6, 0, 8, false},
+	{7, "Space Saga 2008 1080p BluRay", "9 GB", 50, 0, 900, false},
+	{8, "Space Saga 2 2011 2160p UHD BluRay", "21 GB", 8, 0, 7, false},
+	{9, "Space Saga 3 2016 1080p BluRay REMUX", "22 GB", 4, 0, 160, false},
+	{10, "Space Saga 3 2016 720p BluRay", "5 GB", 30, 0, 99, false},
+	{11, "Space Saga 3 3D 2016 1080p", "12 GB", 60, 0, 20, false},
+	{12, "Space Saga 4 2024 2160 Blu ray HEVC", "70 GB", 3, 0, 12, false},
 }
 
 func torrentFile(name string) []byte {
@@ -295,12 +303,27 @@ func TestTorrentTool(t *testing.T) {
 	_, got = run("latest", "--limit", "2")
 	wants(got, "Verdict: the 2 newest", "1. Ubuntu 26.04 Desktop amd64 1080p")
 
+	// A whole series, one torrent per part: the quality asked for where it exists, the next best
+	// where it does not, and that said in so many words.
+	_, got = run("parts", "space", "saga", "--quality", "2160p")
+	wants(got, "Verdict: 4 parts of \"space saga\"", "1. Part 1: Space Saga 2008 2160p UHD BluRay", "2. Part 2: Space Saga 2 2011 2160p",
+		"3. Part 3: Space Saga 3 2016 1080p BluRay REMUX", "4. Part 4: Space Saga 4 2024 2160 Blu ray HEVC",
+		"NOTE: Part 3 is not on the site in 2160p; the best in 1080p was taken instead.", "novee-torrent get --top 4")
+	if strings.Contains(got, "3D") || strings.Contains(got, "720p") {
+		t.Errorf("a 3D version is not a part, and 1080p comes before 720p:\n%s", got)
+	}
+	_, got = run("parts", "space", "saga", "--quality", "2160p", "--get")
+	wants(got, "NOTE: Part 3 is not on the site in 2160p", "Verdict: FETCHED 4 of 4 .torrent files", "ZIP SENT to Chinmay in a separate message: 4 .torrent files")
+	// The same for one thing: asked for in a quality it does not have, the next best with a note.
+	_, got = run("search", "space", "saga", "3", "--quality", "2160p")
+	wants(got, "NOTE: nothing in 2160p", "These are in 1080p instead", "Space Saga 3 2016 1080p BluRay REMUX")
+
 	// Waiting for something: nothing at first, then it is there.
 	_, got = run("watch", "add", "fedora", "--get")
 	wants(got, "WATCHING for \"fedora\"", "send him the .torrent file")
 	_, got = run("watch", "run")
 	wants(got, "not yet: \"fedora\"")
-	catalogue = append(catalogue, row{6, "Fedora 45 Workstation", "2.4 GB", 20, 1, 50, false})
+	catalogue = append(catalogue, row{13, "Fedora 45 Workstation", "2.4 GB", 20, 1, 50, false})
 	_, got = run("watch", "run")
 	wants(got, "Available now on", "Fedora 45 Workstation | 2.4 GB | 20 seeders")
 	log, _ = os.ReadFile(sent)

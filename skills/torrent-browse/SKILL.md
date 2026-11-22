@@ -35,6 +35,7 @@ Hard rule: only `.torrent` files are ever fetched, a few kilobytes that describe
 - `get N` / `get 1 2 3` / `get --top 3`: fetch those results of the last search and send them to Chinmay. They always go as a zip (a chat does not take bare .torrent files), one zip per command.
 - `fetched`: the files fetched lately, newest first, and whether each was sent. Look here when Chinmay says "those", "the ones from before", "all 4".
 - `send --last K`: send the last K fetched files again as ONE zip. `send` alone sends whatever was fetched and not sent yet. Use it for "send them all", "download all 4", "give me the zip".
+- `parts NAME --quality 2160p`: every part of a series (NAME, NAME 2, NAME 3 ...), one torrent per part, best seeded. `--get` sends them as one zip. Use it for "all parts", "the whole series", "one per part".
 - `grab WORDS`: search and send the best result in one step. Use it when Chinmay names exactly what he wants.
 - `watch add WORDS`: check a few times a day and message Chinmay when it appears. With `--get` the file is sent too. `watch list`, `watch remove N`.
 - `status`: the site, the last search, what is being watched.
@@ -49,6 +50,7 @@ Options for search, check, grab and watch: `--quality 1080p`, `--min-seeds 5`, `
 - "Is X available yet?": run `check X`. If the answer is `NOT AVAILABLE YET`, offer to watch for it (`watch add X`).
 - "Get me X": if he was specific, `grab X` (add `--quality` if he named one). If several different things match, `search X` and ask.
 - "All of these", "the whole season", "every one": `search` first, then `get` with the numbers or `get --top K`. At most 25 files at once.
+- `NOTE: ...`: the quality asked for was not there and the next best was taken (for a search, a grab, or one part of a series). Tell Chinmay every NOTE plainly: what is missing and what he gets instead. That is the agreed behaviour: substitute, and say so.
 - `ZIP SENT`: say in one or two lines what was sent. Run nothing more.
 - `THE ZIP COULD NOT BE SENT` with `File:`: send that file with the `message` tool. Never build an archive yourself (`zip`, `tar`); the tool does it.
 - When Chinmay wants several different things (all parts of a series): `grab` each, one command at a time, then `send --last K` once so that he gets one zip with all of them.

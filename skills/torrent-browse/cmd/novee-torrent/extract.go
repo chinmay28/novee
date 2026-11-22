@@ -232,6 +232,38 @@ func ofQuality(hits []hit, want []string) []hit {
 	return out
 }
 
+// ladder is the qualities from best to least.
+var ladder = []string{"2160p", "1080p", "720p", "480p"}
+
+// nextBest returns the hits of the best quality below the one asked for that
+// the list has at all, and that quality's name.
+func nextBest(hits []hit, asked []string) (string, []hit) {
+	if len(asked) == 0 {
+		return "", nil
+	}
+	from := -1
+	for _, q := range asked {
+		q = strings.ToLower(q)
+		if q == "4k" || q == "uhd" || q == "2160" {
+			q = "2160p"
+		}
+		for i, l := range ladder {
+			if strings.TrimSuffix(l, "p") == strings.TrimSuffix(q, "p") && i > from {
+				from = i
+			}
+		}
+	}
+	if from < 0 {
+		return "", nil
+	}
+	for _, l := range ladder[from+1:] {
+		if got := ofQuality(hits, []string{l}); len(got) > 0 {
+			return l, got
+		}
+	}
+	return "", nil
+}
+
 // rank orders hits: by "seeds" (the default; most seeders first, then most
 // completed downloads), "size" (largest first), "small" (smallest first),
 // "new" (as the site listed them) or "name".

@@ -43,6 +43,9 @@ Fetch (the .torrent files go to Chinmay in the chat as a zip; a chat does not ta
   get N [N ...]              results N of the last search
   get --top K                the first K results of the last search
   grab WORDS [options]       search and fetch the best result in one step
+  parts NAME [--quality Q] [--get]   every part of a series (NAME, NAME 2, NAME 3 ...), one torrent
+                             per part: the best in the quality asked for, or the next best
+                             quality where a part does not have it. --get sends them as one zip
 Wait for something:
   watch add WORDS [options] [--get]   tell Chinmay when it appears (--get: and send the file)
   watch list | watch remove N | watch run
@@ -168,12 +171,12 @@ func (t *tool) run(args []string) int {
 	loadJSON(configPath(), &t.cfg)
 	cmds := map[string]func(context.Context, []string) error{
 		"site": t.site, "login": t.login, "search": t.search, "check": t.check, "latest": t.latest, "info": t.info,
-		"get": t.get, "grab": t.grab, "send": t.send, "fetched": t.fetchedList, "watch": t.watch, "status": t.status,
+		"get": t.get, "grab": t.grab, "parts": t.parts, "send": t.send, "fetched": t.fetchedList, "watch": t.watch, "status": t.status,
 	}
 	// Words a model reaches for instead of the command names.
 	alias := map[string]string{"find": "search", "track": "search", "lookup": "search", "query": "search", "browse": "search",
 		"available": "check", "availability": "check", "is-available": "check", "exists": "check",
-		"download": "get", "fetch": "get", "zip": "send", "bundle": "send", "sendall": "send", "send-all": "send", "resend": "send", "new": "latest", "details": "info", "notify": "watch",
+		"download": "get", "fetch": "get", "zip": "send", "bundle": "send", "sendall": "send", "send-all": "send", "resend": "send", "new": "latest", "details": "info", "notify": "watch", "series": "parts", "collection": "parts", "all-parts": "parts", "sequels": "parts",
 		"recent": "fetched", "history": "fetched", "downloads": "fetched", "downloaded": "fetched", "files": "fetched", "list": "fetched"}
 	if to, ok := alias[args[0]]; ok {
 		args[0] = to
@@ -650,7 +653,13 @@ func (t *tool) results(ctx context.Context, o options) (*page.Page, []hit, int, 
 	if !relevant(l.Hits, words) {
 		l.Hits = nil
 	}
-	hits := ofQuality(filter(l.Hits, o.must, o.exclude, o.minSeeds), o.quality)
+	passed := filter(l.Hits, o.must, o.exclude, o.minSeeds)
+	hits := ofQuality(passed, o.quality)
+	if lower, got := nextBest(passed, o.quality); len(hits) == 0 && len(got) > 0 {
+		// Not there in the quality asked for: the best of the next quality down, and say so.
+		fmt.Fprintf(t.out, "NOTE: nothing in %s for %s. These are in %s instead, the next best quality on the site. Tell Chinmay that plainly.\n", strings.Join(o.quality, ", "), describe(options{words: o.words}), lower)
+		hits = got
+	}
 	rank(hits, o.sort)
 	total := len(hits)
 	if len(hits) > o.limit {
@@ -1088,4 +1097,110 @@ func (t *tool) status(_ context.Context, _ []string) error {
 		fmt.Fprintf(t.out, "%d. %s (since %s)\n", i+1, strings.Join(w.Args, " "), w.Added.Format("01/02"))
 	}
 	return nil
+}
+
+var (
+	yearIn  = regexp.MustCompile(`\b(19|20)\d{2}\b`)
+	nonWord = regexp.MustCompile(`[^\p{L}\p{N}]+`)
+	partNo  = regexp.MustCompile(`^(?:part )?(\d{1,2}|ii|iii|iv|v|vi|vii|viii|ix|x)$`)
+	roman   = map[string]int{"ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8, "ix": 9, "x": 10}
+)
+
+// partOf says which part of the series a release is: 1 for "NAME 2008 ...",
+// 3 for "NAME 3 2016 ...", 0 for something else that merely has the name in
+// it (a 3D version, a collection, another title).
+func partOf(name, series string) int {
+	clean := func(s string) string { return strings.TrimSpace(nonWord.ReplaceAllString(strings.ToLower(s), " ")) }
+	title := name
+	if i := yearIn.FindStringIndex(name); i != nil { // a release name is "title year technical details"
+		title = name[:i[0]]
+	}
+	title, series = clean(title), clean(series)
+	if title == series {
+		return 1
+	}
+	rest, ok := strings.CutPrefix(title, series+" ")
+	if !ok {
+		return 0
+	}
+	m := partNo.FindStringSubmatch(rest)
+	if m == nil {
+		return 0
+	}
+	if n, ok := roman[m[1]]; ok {
+		return n
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
+}
+
+// parts finds every part of a series and picks one torrent for each.
+func (t *tool) parts(ctx context.Context, args []string) error {
+	o, err := parseOptions(args)
+	t.plain(&o)
+	if err != nil || len(o.words) == 0 {
+		return errors.Join(err, errors.New("usage: parts NAME [--quality 2160p] [--get]"))
+	}
+	series := strings.Join(o.words, " ")
+	asked := o.quality
+	p, l, err := t.find(ctx, series, o.pages)
+	if err != nil {
+		return err
+	}
+	byPart := map[int][]hit{}
+	for _, h := range filter(l.Hits, o.must, o.exclude, o.minSeeds) {
+		if n := partOf(h.Name, series); n > 0 {
+			byPart[n] = append(byPart[n], h)
+		}
+	}
+	if len(byPart) == 0 {
+		fmt.Fprintf(t.out, "Verdict: NOTHING FOUND for a series called %q on %s. Try `novee-torrent search %s` to see what the site calls it.\n", series, t.cfg.Site, series)
+		return nil
+	}
+	var nums []int
+	for n := range byPart {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+	var picks []hit
+	var lines, notes []string
+	for _, n := range nums {
+		all := byPart[n]
+		got, quality := ofQuality(all, asked), strings.Join(asked, ", ")
+		if len(asked) > 0 && len(got) == 0 {
+			lower, next := nextBest(all, asked)
+			if len(next) == 0 { // not in any quality that can be named: whatever there is
+				next, lower = all, "another quality"
+			}
+			got = next
+			notes = append(notes, fmt.Sprintf("Part %d is not on the site in %s; the best in %s was taken instead.", n, quality, lower))
+		} else if len(asked) == 0 {
+			got = all
+		}
+		rank(got, "seeds")
+		best := got[0]
+		note := ""
+		if best.Seeds == 0 {
+			note = "  <- no seeders right now"
+		}
+		picks = append(picks, best)
+		lines = append(lines, fmt.Sprintf("%d. Part %d: %s%s", len(picks), n, best.line(), note))
+	}
+	_ = saveJSON(lastPath(), lastSearch{Words: series + " (all parts)", When: time.Now(), URL: l.URL, Hits: picks})
+	what := "the best seeded copy of each"
+	if len(asked) > 0 {
+		what = "one per part, in " + strings.Join(asked, ", ") + " where the site has it"
+	}
+	fmt.Fprintf(t.out, "Verdict: %d parts of %q on %s; %s:\n%s\n", len(picks), series, t.cfg.Site, what, strings.Join(lines, "\n"))
+	for _, n := range notes {
+		fmt.Fprintln(t.out, "NOTE: "+n)
+	}
+	if len(notes) > 0 {
+		fmt.Fprintln(t.out, "Tell Chinmay each NOTE plainly, with the part and the quality he gets instead.")
+	}
+	if !o.get {
+		fmt.Fprintf(t.out, "To send Chinmay these %d as one zip: novee-torrent get --top %d\n", len(picks), len(picks))
+		return nil
+	}
+	return t.deliver(ctx, p, picks, series+" (all parts)", !o.noSend)
 }
