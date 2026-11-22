@@ -15,8 +15,10 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/chinmay28/novee/skills/web-browse/page"
@@ -34,7 +36,9 @@ Find:
   check WORDS [options]      "is it available yet?": yes or no, and the best copies if yes
   latest [options]           what the site added most recently
   info N                     the page of result N: description, files, details
-Fetch (the .torrent files go to Chinmay in the chat; several come as one zip):
+Fetch (the .torrent files go to Chinmay in the chat as a zip; a chat does not take bare .torrent files):
+  send                       send what was fetched and not sent yet, as one zip
+  send --last K              send the last K fetched files again, as one zip
   get N [N ...]              results N of the last search
   get --top K                the first K results of the last search
   grab WORDS [options]       search and fetch the best result in one step
@@ -156,12 +160,12 @@ func (t *tool) run(args []string) int {
 	loadJSON(configPath(), &t.cfg)
 	cmds := map[string]func(context.Context, []string) error{
 		"site": t.site, "login": t.login, "search": t.search, "check": t.check, "latest": t.latest, "info": t.info,
-		"get": t.get, "grab": t.grab, "watch": t.watch, "status": t.status,
+		"get": t.get, "grab": t.grab, "send": t.send, "watch": t.watch, "status": t.status,
 	}
 	// Words a model reaches for instead of the command names.
 	alias := map[string]string{"find": "search", "track": "search", "lookup": "search", "query": "search", "browse": "search",
 		"available": "check", "availability": "check", "is-available": "check", "exists": "check",
-		"download": "get", "fetch": "get", "send": "get", "new": "latest", "recent": "latest", "details": "info", "notify": "watch"}
+		"download": "get", "fetch": "get", "zip": "send", "bundle": "send", "sendall": "send", "send-all": "send", "resend": "send", "new": "latest", "recent": "latest", "details": "info", "notify": "watch"}
 	if to, ok := alias[args[0]]; ok {
 		args[0] = to
 	}
@@ -188,6 +192,10 @@ func (t *tool) run(args []string) int {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
+	// One at a time: two commands in the same browser would read each other's pages.
+	if unlock, err := lock(ctx); err == nil {
+		defer unlock()
+	}
 	if err := cmd(ctx, args[1:]); err != nil {
 		if !errors.Is(err, errSaid) {
 			fmt.Fprintln(t.out, "ERROR:", err)
@@ -195,6 +203,26 @@ func (t *tool) run(args []string) int {
 		return exitError
 	}
 	return exitOK
+}
+
+// lock waits for any other novee-torrent command to finish.
+func lock(ctx context.Context) (func(), error) {
+	if err := os.MkdirAll(dataDir(), 0o700); err != nil {
+		return nil, err
+	}
+	f, err := os.OpenFile(filepath.Join(dataDir(), "lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	for syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB) != nil {
+		select {
+		case <-ctx.Done():
+			f.Close()
+			return nil, ctx.Err()
+		case <-time.After(300 * time.Millisecond):
+		}
+	}
+	return func() { _ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN); f.Close() }, nil
 }
 
 // errSaid means the reason was already printed.
@@ -237,8 +265,10 @@ func parseOptions(args []string) (options, error) {
 			o.limit, err = num()
 		case "--pages":
 			o.pages, err = num()
-		case "--top":
+		case "--top", "--last":
 			o.top, err = num()
+		case "--site", "--tracker": // the site is set once, not per command
+			_, err = val()
 		case "--quality":
 			var v string
 			if v, err = val(); err == nil {
@@ -569,7 +599,30 @@ type lastSearch struct {
 func lastPath() string { return filepath.Join(dataDir(), "last-search.json") }
 
 // results runs a search, filters and orders it, and remembers it for `get`.
+// plain takes the site's own name out of the words: in "X on tracker.example"
+// the site is not part of what is searched for.
+func (t *tool) plain(o *options) {
+	if u, err := url.Parse(t.cfg.Site); err == nil && u.Hostname() != "" {
+		host := strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+		var kept []string
+		for _, w := range o.words {
+			low := strings.ToLower(w)
+			if strings.Contains(low, host) || strings.Contains(low, strings.SplitN(host, ".", 2)[0]) && len(strings.SplitN(host, ".", 2)[0]) > 4 {
+				if n := len(kept); n > 0 && (strings.EqualFold(kept[n-1], "on") || strings.EqualFold(kept[n-1], "from") || strings.EqualFold(kept[n-1], "at")) {
+					kept = kept[:n-1]
+				}
+				continue
+			}
+			kept = append(kept, w)
+		}
+		if len(kept) > 0 {
+			o.words = kept
+		}
+	}
+}
+
 func (t *tool) results(ctx context.Context, o options) (*page.Page, []hit, int, error) {
+	t.plain(&o)
 	words := strings.Join(o.words, " ")
 	p, l, err := t.find(ctx, words, o.pages)
 	if err == nil && len(l.Hits) > 0 && !relevant(l.Hits, words) && t.cfg.Search != "" {
@@ -616,6 +669,7 @@ func describe(o options) string {
 
 func (t *tool) search(ctx context.Context, args []string) error {
 	o, err := parseOptions(args)
+	t.plain(&o)
 	if err != nil || len(o.words) == 0 {
 		return errors.Join(err, errors.New("usage: search WORDS [--sort seeds|size|small|new|name] [--min-seeds N] [--quality 1080p] [--limit N]"))
 	}
@@ -640,6 +694,7 @@ func (t *tool) search(ctx context.Context, args []string) error {
 
 func (t *tool) check(ctx context.Context, args []string) error {
 	o, err := parseOptions(args)
+	t.plain(&o)
 	if err != nil || len(o.words) == 0 {
 		return errors.Join(err, errors.New("usage: check WORDS [--quality 1080p] [--min-seeds N]"))
 	}
@@ -794,28 +849,108 @@ func (t *tool) deliver(ctx context.Context, p *page.Page, hits []hit, what strin
 		fmt.Fprintln(t.out, "Verdict: NOTHING WAS FETCHED. Tell Chinmay why, as written above.")
 		return errSaid
 	}
-	path, caption := files[0], "Torrent file: "+strings.TrimSuffix(filepath.Base(files[0]), ".torrent")
-	if len(files) > 1 {
-		path = filepath.Join(dir, safeName(what)+" - "+strconv.Itoa(len(files))+" torrents.zip")
-		if err := zipFiles(path, files); err != nil {
-			return err
-		}
-		caption = fmt.Sprintf("%d torrent files for %s, in one zip.", len(files), what)
-	}
-	fmt.Fprintf(t.out, "Verdict: FETCHED %d of %d .torrent files", len(files), len(hits))
-	if len(files) > 1 {
-		fmt.Fprint(t.out, " and put them in one zip")
-	}
-	fmt.Fprintln(t.out, ":")
+	fmt.Fprintf(t.out, "Verdict: FETCHED %d of %d .torrent files:\n", len(files), len(hits))
 	for _, f := range files {
 		fmt.Fprintln(t.out, "- "+filepath.Base(f))
 	}
-	if !send || notifyOwnerFile(caption, path) != nil {
-		fmt.Fprintf(t.out, "The file was saved but NOT sent. Send it to Chinmay with the message tool.\nFile: %s\n", path)
+	if !send {
+		fmt.Fprintf(t.out, "They were saved and NOT sent. To send them to Chinmay as one zip: novee-torrent send --last %d\n", len(files))
 		return nil
 	}
-	fmt.Fprintln(t.out, "FILE SENT to Chinmay in a separate message. Tell him what was sent, in one or two lines. Run no more commands.")
+	return t.sendZip(files, what)
+}
+
+// sendZip sends .torrent files to the owner as one zip. A chat takes a zip
+// but not a bare .torrent file, so even a single file goes this way.
+func (t *tool) sendZip(files []string, what string) error {
+	name := safeName(what)
+	if len(files) == 1 {
+		name = strings.TrimSuffix(filepath.Base(files[0]), ".torrent")
+	} else {
+		name = fmt.Sprintf("%s - %d torrents", name, len(files))
+	}
+	dir := filepath.Join(sendDir(), "zips")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	path := filepath.Join(dir, name+".zip")
+	if err := zipFiles(path, files); err != nil {
+		return err
+	}
+	caption := fmt.Sprintf("%d torrent files for %s, in one zip.", len(files), what)
+	if len(files) == 1 {
+		caption = "Torrent file (in a zip): " + strings.TrimSuffix(filepath.Base(files[0]), ".torrent")
+	}
+	if err := notifyOwnerFile(caption, path); err != nil {
+		fmt.Fprintf(t.out, "THE ZIP COULD NOT BE SENT: %v\nIt is saved. Send it to Chinmay with the message tool; do not build another archive.\nFile: %s\n", err, path)
+		return errSaid
+	}
+	for _, f := range files {
+		_ = os.WriteFile(f+".sent", nil, 0o600)
+	}
+	fmt.Fprintf(t.out, "ZIP SENT to Chinmay in a separate message: %d .torrent files in %s. Tell him that in one or two lines. Run no more commands.\n", len(files), filepath.Base(path))
 	return nil
+}
+
+// fetched lists the .torrent files fetched so far, newest first, one per name.
+func fetched() []string {
+	type f struct {
+		path string
+		at   time.Time
+	}
+	var all []f
+	paths, _ := filepath.Glob(filepath.Join(sendDir(), "*", "*.torrent"))
+	for _, p := range paths {
+		if st, err := os.Stat(p); err == nil {
+			all = append(all, f{p, st.ModTime()})
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].at.After(all[j].at) })
+	seen := map[string]bool{}
+	var out []string
+	for _, x := range all {
+		if !seen[filepath.Base(x.path)] {
+			seen[filepath.Base(x.path)] = true
+			out = append(out, x.path)
+		}
+	}
+	return out
+}
+
+// send sends files that were fetched earlier: the ones not sent yet, or the last K.
+func (t *tool) send(_ context.Context, args []string) error {
+	o, err := parseOptions(args)
+	if err != nil {
+		return err
+	}
+	all := fetched()
+	k := o.top
+	if k == 0 && len(o.positions) == 1 { // "send 4" means the last four
+		k = o.positions[0]
+	}
+	var pick []string
+	if k > 0 {
+		pick = all[:min(k, len(all))]
+	} else {
+		for _, f := range all {
+			st, err := os.Stat(f)
+			if _, sent := os.Stat(f + ".sent"); sent != nil && err == nil && time.Since(st.ModTime()) < 24*time.Hour {
+				pick = append(pick, f)
+			}
+		}
+	}
+	if len(pick) == 0 {
+		if len(all) == 0 {
+			fmt.Fprintln(t.out, "No .torrent files have been fetched yet. Fetch first: novee-torrent grab WORDS, or search and then get N.")
+		} else {
+			fmt.Fprintf(t.out, "Every fetched file was already sent. To send the last K again as one zip: novee-torrent send --last K (there are %d).\n", len(all))
+		}
+		return nil
+	}
+	if len(pick) > maxBatch {
+		pick = pick[:maxBatch]
+	}
+	return t.sendZip(pick, "your torrents "+time.Now().Format("01-02 15.04"))
 }
 
 func (t *tool) get(ctx context.Context, args []string) error {
@@ -866,6 +1001,7 @@ func firstNonEmpty(a, b string) string {
 
 func (t *tool) grab(ctx context.Context, args []string) error {
 	o, err := parseOptions(args)
+	t.plain(&o)
 	if err != nil || len(o.words) == 0 {
 		return errors.Join(err, errors.New("usage: grab WORDS [--quality 1080p] [--min-seeds N]"))
 	}

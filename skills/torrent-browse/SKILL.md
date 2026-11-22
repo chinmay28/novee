@@ -32,7 +32,8 @@ Hard rule: only `.torrent` files are ever fetched, a few kilobytes that describe
 - `check WORDS`: answers "is it available yet". `AVAILABLE`, `LISTED BUT NOT SEEDED` or `NOT AVAILABLE YET`.
 - `latest`: what the site added most recently.
 - `info N`: the page of result N of the last search (description, files).
-- `get N` / `get 1 2 3` / `get --top 3`: fetch those results of the last search and send Chinmay the files. Several files are sent as one zip.
+- `get N` / `get 1 2 3` / `get --top 3`: fetch those results of the last search and send them to Chinmay. They always go as a zip (a chat does not take bare .torrent files), one zip per command.
+- `send --last K`: send the last K fetched files again as ONE zip. `send` alone sends whatever was fetched and not sent yet. Use it for "send them all", "download all 4", "give me the zip".
 - `grab WORDS`: search and send the best result in one step. Use it when Chinmay names exactly what he wants.
 - `watch add WORDS`: check a few times a day and message Chinmay when it appears. With `--get` the file is sent too. `watch list`, `watch remove N`.
 - `status`: the site, the last search, what is being watched.
@@ -46,8 +47,9 @@ Options for search, check, grab and watch: `--quality 1080p`, `--min-seeds 5`, `
 - "Is X available yet?": run `check X`. If the answer is `NOT AVAILABLE YET`, offer to watch for it (`watch add X`).
 - "Get me X": if he was specific, `grab X` (add `--quality` if he named one). If several different things match, `search X` and ask.
 - "All of these", "the whole season", "every one": `search` first, then `get` with the numbers or `get --top K`. At most 25 files at once.
-- `FILE SENT`: say in one or two lines what was sent. Run nothing more.
-- `NOT sent` with `File:`: send that file with the `message` tool.
+- `ZIP SENT`: say in one or two lines what was sent. Run nothing more.
+- `THE ZIP COULD NOT BE SENT` with `File:`: send that file with the `message` tool. Never build an archive yourself (`zip`, `tar`); the tool does it.
+- When Chinmay wants several different things (all parts of a series): `grab` each, one command at a time, then `send --last K` once so that he gets one zip with all of them.
 - `NOT FETCHED: ...`: tell Chinmay the reason as written (a magnet-only entry, no download slots, a ratio rule).
 - `NOT SIGNED IN` with `SIGN-IN LINK SENT`: reply "I sent you a sign-in link for the torrent site. Open it, sign in, tap Done, then tell me." and stop. When he says done, run the same command again.
 - `THE SITE WANTS A HUMAN CHECK`: the same: a link was sent; he passes the check and taps Done.

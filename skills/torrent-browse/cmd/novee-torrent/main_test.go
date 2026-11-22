@@ -239,16 +239,16 @@ func TestTorrentTool(t *testing.T) {
 
 	// One file goes as it is.
 	_, got = run("get", "1")
-	wants(got, "Verdict: FETCHED 1 of 1 .torrent files", "- Debian 14 netinst.torrent", "FILE SENT to Chinmay")
+	wants(got, "Verdict: FETCHED 1 of 1 .torrent files", "- Debian 14 netinst.torrent", "ZIP SENT to Chinmay")
 	log, _ := os.ReadFile(sent)
-	if !strings.Contains(string(log), "Torrent file: Debian 14 netinst|") || !strings.Contains(string(log), "Debian 14 netinst.torrent") {
-		t.Errorf("the owner must get the file: %s", log)
+	if !strings.Contains(string(log), "Torrent file (in a zip): Debian 14 netinst|") || !strings.Contains(string(log), "Debian 14 netinst.zip") {
+		t.Errorf("the owner must get the file, zipped: %s", log)
 	}
 
 	// Several go as one zip; a magnet-only row is left out and said so.
 	_, _ = run("search", "ubuntu")
 	_, got = run("get", "--top", "3")
-	wants(got, "NOT FETCHED: Ubuntu Studio 26.04: the site gives only a magnet link", "Verdict: FETCHED 2 of 3 .torrent files and put them in one zip", "FILE SENT")
+	wants(got, "NOT FETCHED: Ubuntu Studio 26.04: the site gives only a magnet link", "Verdict: FETCHED 2 of 3 .torrent files", "ZIP SENT to Chinmay in a separate message: 2 .torrent files")
 	log, _ = os.ReadFile(sent)
 	lines := strings.Split(strings.TrimSpace(string(log)), "\n")
 	zipPath := lines[len(lines)-1][strings.LastIndex(lines[len(lines)-1], "|")+1:]
@@ -270,7 +270,15 @@ func TestTorrentTool(t *testing.T) {
 	_, got = run("info", "1")
 	wants(got, "Result 1: Ubuntu 26.04 Server amd64", "Official image.")
 	_, got = run("grab", "debian", "--no-send")
-	wants(got, "Best of 1 results", "Verdict: FETCHED 1 of 1", "NOT sent", "File: ")
+	wants(got, "Best of 1 results", "Verdict: FETCHED 1 of 1", "NOT sent", "novee-torrent send --last 1")
+	// "Send me all of them as a zip": what was fetched goes out again as one archive, by one command.
+	_, got = run("send", "--last", "3")
+	wants(got, "ZIP SENT to Chinmay in a separate message: 3 .torrent files")
+	_, got = run("send")
+	wants(got, "Every fetched file was already sent")
+	// The site's own name among the words is not searched for.
+	_, got = run("search", "debian", "on", strings.TrimPrefix(srv.URL, "http://"), "--site", srv.URL)
+	wants(got, "Verdict: 1 results for \"debian\"")
 	_, got = run("latest", "--limit", "2")
 	wants(got, "Verdict: the 2 newest", "1. Ubuntu 26.04 Desktop amd64 1080p")
 
@@ -283,7 +291,7 @@ func TestTorrentTool(t *testing.T) {
 	_, got = run("watch", "run")
 	wants(got, "Available now on", "Fedora 45 Workstation | 2.4 GB | 20 seeders")
 	log, _ = os.ReadFile(sent)
-	wants(string(log), "Available now on", "Fedora 45 Workstation.torrent")
+	wants(string(log), "Available now on", "Fedora 45 Workstation.zip")
 	_, got = run("watch", "list")
 	wants(got, "Nothing is being watched for.")
 }

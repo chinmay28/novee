@@ -830,7 +830,9 @@ func (a *app) requestSignIn(site string, auto bool) error {
 // novee-browse finds tools built on it this way.
 func (a *app) helper(args []string) (int, bool) {
 	name, rest := args[0], args[1:]
-	if i := strings.Index(name, "-"); i > 0 {
+	if to, ok := companionVerbs[name]; ok { // a companion's own command, asked of this program
+		name, rest = to, args
+	} else if i := strings.Index(name, "-"); i > 0 {
 		name, rest = name[:i], append([]string{name[i+1:]}, rest...)
 	}
 	if !regexp.MustCompile(`^[a-z]{2,20}$`).MatchString(name) || name == "browse" {
@@ -898,3 +900,7 @@ func (a *app) live(ctx context.Context, _ []string) (int, error) {
 	fmt.Fprintf(a.out, "LIVE LINK SENT to Chinmay in a separate message (valid %d minutes).\n"+after, int(viewerLimit.Minutes()))
 	return exitOK, nil
 }
+
+// companionVerbs are commands of companion programs that a model asks this
+// program for by their bare name.
+var companionVerbs = map[string]string{"search": "torrent", "check": "torrent", "grab": "torrent", "latest": "torrent", "send": "torrent"}

@@ -273,6 +273,14 @@
      "argPattern": "^torrent[- ](site$|(?!site\\b)[a-z-]+( .*)?$)"
     },
     {
+     "pattern": "novee-browse",
+     "argPattern": "^(search|check|grab|latest|send)( .*)?$"
+    },
+    {
+     "pattern": "/home/chinmay/.local/bin/novee-browse",
+     "argPattern": "^(search|check|grab|latest|send)( .*)?$"
+    },
+    {
      "pattern": "openclaw",
      "argPattern": "^(status|health|channels status|skills list|models list|config get|sessions list|--version|logs)( .*)?$"
     }
