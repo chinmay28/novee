@@ -69,6 +69,13 @@ func (p *Page) eval(ctx context.Context, js string, out any) error {
 	return json.Unmarshal(raw, out)
 }
 
+// Eval runs a script in the page and decodes what it returns into out. It is
+// for tools built on this package that read a kind of page in their own way.
+func (p *Page) Eval(ctx context.Context, js string, out any) error { return p.eval(ctx, js, out) }
+
+// Settle waits for the page to finish what an action started.
+func (p *Page) Settle(ctx context.Context) { p.settle(ctx) }
+
 // settle waits for the page to finish what an action started: a navigation,
 // or a script redrawing part of the page.
 func (p *Page) settle(ctx context.Context) {
