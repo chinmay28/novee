@@ -80,3 +80,4 @@ A short log of how Novee was built. Dates are 2026.
 
 - Uber Eats got the DoorDash treatment. To add it, the DoorDash commands were first turned into shop-neutral ones driven by a short description of a shop: how to list its orders, how to read a receipt, what it calls its credits.
 - Three things were new. Uber signs in with a phone number and a code, with no password field to recognise the page by. A receipt is a document in a frame inside a pop-up, which the reader did not see and could not print whole. And Uber Cash is not only gift cards (card benefits fill it too), so unlike DoorDash credits it is reported but not priced.
+- Amazon was next and is not coming. During the sign-in it answered "Continued access by an unauthorized AI agent violates Amazon's Conditions of Use". The owner decided to leave it out, and the browser now refuses Amazon's addresses outright so that Novee does not wander in anyway.

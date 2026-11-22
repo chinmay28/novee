@@ -72,6 +72,8 @@ DoorDash order and receipt questions work the same way, with `doordash` in place
 
 Uber Eats works the same way again, with `ubereats`: `novee-browse ubereats-receipt last`, `ubereats-receipt 11/11/2026`, `ubereats-receipts 2026`, `ubereats-year-pdf all`, `ubereats-spending 2026`. Its stored money is called Uber Cash. When Chinmay asks about food delivery spending without naming the service, ask which one, or run both spending commands one after the other (only one background job runs at a time; wait for the first to finish).
 
+Amazon is not available: it does not allow AI agents and the browser refuses its addresses. If Chinmay asks for Amazon orders, receipts or spending, say that in one sentence and do not try another tool.
+
 Other shop, order and account questions (online orders, another site Chinmay has an account on, a page that needs a sign-in) go through the same tool one step at a time.
 - First command, exactly: `novee-browse open URL`. `novee-browse` is a program, not a Python script.
 - Then one step per command (`novee-browse click 45`, `type 11 batteries --enter`, `select 48 Last 3 Months`, `scroll down`, `find WORDS`, `read`, `pdf`, `close`), always using the numbers from the latest output.

@@ -73,6 +73,12 @@ func Open(raw string) (Decision, string) {
 	return Allow, ""
 }
 
+// noAgents matches sites that turn AI agents away in so many words. Amazon
+// answered a sign-in with "Continued access by an unauthorized AI agent
+// violates Amazon's Conditions of Use"; that is a decision to respect, not
+// an obstacle to get around.
+var noAgents = regexp.MustCompile(`(^|\.)amazon\.[a-z.]+$`)
+
 // URL checks an address the agent wants to open. Only public http(s) sites
 // are allowed unless allowLAN is set: pages on this machine or the home
 // network (routers, admin panels) are not for unattended browsing.
@@ -86,6 +92,9 @@ func URL(raw string, allowLAN bool) error {
 	}
 	if u.User != nil {
 		return errors.New("addresses with a user name or password in them are not opened")
+	}
+	if noAgents.MatchString(strings.ToLower(u.Hostname())) {
+		return fmt.Errorf("%s does not allow AI agents and says so on its pages, so it is not opened. Tell Chinmay that; do not look for another way in", u.Hostname())
 	}
 	if allowLAN {
 		return nil

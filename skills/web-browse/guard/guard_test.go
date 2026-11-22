@@ -98,3 +98,14 @@ func TestURL(t *testing.T) {
 		t.Error("allowLAN must not allow other schemes")
 	}
 }
+
+func TestNoAgentsSites(t *testing.T) {
+	for _, u := range []string{"https://www.amazon.com/your-orders", "https://amazon.com/", "https://www.amazon.co.uk/x"} {
+		if err := URL(u, true); err == nil {
+			t.Errorf("%s must not be opened", u)
+		}
+	}
+	if err := URL("https://www.amazonia-travel.example/", false); err != nil {
+		t.Errorf("a name that merely starts like it is fine: %v", err)
+	}
+}
