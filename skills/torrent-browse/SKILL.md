@@ -51,6 +51,8 @@ Options for search, check, grab and watch: `--quality 1080p`, `--min-seeds 5`, `
 - `NOT FETCHED: ...`: tell Chinmay the reason as written (a magnet-only entry, no download slots, a ratio rule).
 - `NOT SIGNED IN` with `SIGN-IN LINK SENT`: reply "I sent you a sign-in link for the torrent site. Open it, sign in, tap Done, then tell me." and stop. When he says done, run the same command again.
 - `THE SITE WANTS A HUMAN CHECK`: the same: a link was sent; he passes the check and taps Done.
+- `NOTHING FOUND`: say it is not on his site, and offer `watch add`. Never suggest other sites, other trackers or a torrent client, and do not search the web for torrents.
+- "Show me the browser" / "what do you see": run `novee-browse live`; Chinmay gets a link to watch the browser and click in it himself.
 - `ERROR`: quote it. Do not retry unchanged and do not open the site with other tools.
 - Zero seeders means it cannot be downloaded now. Say so instead of sending it, unless he asks anyway.
 

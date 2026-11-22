@@ -59,6 +59,7 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 - `download N`: click a Download button or link and keep the file; the output has `File: PATH`.
 - `screenshot`, `pdf`: save what is shown; the output has `File: PATH`. Send that file with the `message` tool.
 - `login-request`: send Chinmay a new link to this browser so he signs in himself. No arguments. The first link is sent automatically when a page asks for a password.
+- `live`: send Chinmay a link to watch this browser as it is and to click in it himself. Use it when he asks to see the browser or doubts what you report.
 - `status`, `close`: is a browser open; close it when the task is finished.
 
 ## Rules

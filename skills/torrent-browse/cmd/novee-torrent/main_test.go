@@ -37,6 +37,8 @@ type row struct {
 	magnet                 bool
 }
 
+var shouted int
+
 var catalogue = []row{
 	{1, "Ubuntu 26.04 Desktop amd64 1080p", "5.8 GB", 12, 3, 140, false},
 	{2, "Ubuntu 26.04 Server amd64", "2.1 GB", 310, 4, 9000, false},
@@ -60,7 +62,16 @@ func tracker() http.Handler {
 			fmt.Fprint(w, login)
 			return
 		}
-		fmt.Fprint(w, `<title>Tracker</title><main><h1>Welcome</h1><form action="/browse.php"><input type="search" name="search" placeholder="Search torrents"><button>Go</button></form></main>`)
+		// Like many trackers: the front page (and any address it does not know) lists the newest
+		// torrents, has a chat box, and keeps the search on the Torrents page.
+		fmt.Fprint(w, `<title>Tracker</title><main><h1>Welcome</h1><a href="/torrents-page">Torrents</a>
+<form action="/shout"><input name="chatbarText" value="This is a Shout Box not a Search engine!!"></form>
+<table><tr><th>Name</th><th>DL</th><th>Size</th><th>S</th><th>L</th></tr>
+<tr><td><a href="/details.php?id=90">Faces of Nothing 1978</a></td><td><a href="/download.php?id=1">DL</a></td><td>57 GB</td><td>3</td><td>0</td></tr></table></main>`)
+	})
+	mux.HandleFunc("/shout", func(w http.ResponseWriter, r *http.Request) { shouted++ })
+	mux.HandleFunc("/torrents-page", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<title>Torrents</title><main><form action="/browse.php"><input name="search"><input type="hidden" name="active" value="1"><button>Search</button></form></main>`)
 	})
 	mux.HandleFunc("/dologin", func(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, &http.Cookie{Name: "sid", Value: "ok", Path: "/"})
@@ -194,9 +205,21 @@ func TestTorrentTool(t *testing.T) {
 		"2. Ubuntu Studio 26.04 | 6.5 GB | 45 seeders, 0 leechers | completed 300 times | Apps | magnet link only",
 		"4. Ubuntu 24.04 Desktop amd64 | 4.9 GB | 0 seeders, 1 leechers")
 	var cfg config
-	if !loadJSON(configPath(), &cfg) || !strings.Contains(cfg.Search, "browse.php?search={q}") {
-		t.Errorf("the search address must be learned, got %q", cfg.Search)
+	if !loadJSON(configPath(), &cfg) || !strings.Contains(cfg.Search, "browse.php?search={q}&active=1") {
+		t.Errorf("the search address must be learned from the site's own search box, got %q", cfg.Search)
 	}
+	if shouted != 0 {
+		t.Error("search words must never be typed into a chat box")
+	}
+	// A wrong remembered address (the site answers it with its front page) is noticed and replaced.
+	cfg.Search = "/torrents?name={q}"
+	_ = saveJSON(configPath(), cfg)
+	_, got = run("search", "debian")
+	wants(got, "Verdict: 1 results", "Debian 14 netinst")
+	if loadJSON(configPath(), &cfg); !strings.Contains(cfg.Search, "browse.php?search={q}") {
+		t.Errorf("a search address that ignores the words must be dropped, got %q", cfg.Search)
+	}
+	_, got = run("search", "ubuntu")
 	_, got = run("search", "ubuntu", "--sort", "size", "--quality", "desktop", "--min-seeds", "1")
 	wants(got, "Verdict: 1 results", "1. Ubuntu 26.04 Desktop amd64 1080p | 5.8 GB")
 

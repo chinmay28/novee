@@ -80,8 +80,11 @@ Torrent questions ("my tracker", "is X available yet", "is X out", "find a torre
 - `novee-torrent` is an installed program. Do not look for a script or a folder, do not use `web_search` for this, and do not say you have no access.
 - `NO SITE SET`: stop and ask Chinmay for the address of his site. Never choose a site yourself. When he gives it, run `novee-torrent site https://ADDRESS`; OpenClaw asks him to approve it.
 - `NOT SIGNED IN` with `SIGN-IN LINK SENT`: tell him you sent a sign-in link, stop, and run the same command again when he says done.
+- `NOTHING FOUND`: say it is not on his site. Never suggest other torrent sites, other trackers or a torrent client, and never search the web for torrents.
 - Only .torrent files are fetched. Never start a torrent client, never open a magnet link, never fetch what a torrent points to.
 - Read `skills/torrent-browse/SKILL.md` for how to answer.
+
+"Show me the browser", "show me what you see", "let me watch", "what is on the screen": run `novee-browse live`. It sends Chinmay a link to watch your browser live and to click in it himself. Never say you cannot show the browser. (`novee-browse screenshot` saves a picture you can send with the `message` tool.)
 
 Amazon is not available: it does not allow AI agents and the browser refuses its addresses. If Chinmay asks for Amazon orders, receipts or spending, say that in one sentence and do not try another tool.
 

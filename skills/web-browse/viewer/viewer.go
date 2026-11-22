@@ -26,6 +26,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -152,7 +153,7 @@ func (s *server) authed(h http.HandlerFunc) http.HandlerFunc {
 
 func (s *server) index(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = pageTmpl.Execute(w, map[string]any{"Token": s.info.Token, "Site": s.info.Site,
+	_ = pageTmpl.Execute(w, map[string]any{"Token": s.info.Token, "Site": strings.TrimPrefix(s.info.Site, "live:"), "Live": strings.HasPrefix(s.info.Site, "live:"),
 		"Minutes": int(time.Until(s.info.Until).Minutes())})
 }
 

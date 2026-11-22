@@ -435,9 +435,60 @@ func read(ctx context.Context, p *page.Page, pages int) (listing, error) {
 	}
 }
 
+// relevant says whether a list answers the search: some result has one of the
+// words in its name. A site that does not know an address often answers with
+// its front page, and the newest torrents there are not results.
+func relevant(hits []hit, words string) bool {
+	var ws []string
+	for _, w := range strings.Fields(strings.ToLower(words)) {
+		if len(w) >= 3 {
+			ws = append(ws, w)
+		}
+	}
+	if len(ws) == 0 {
+		return len(hits) > 0
+	}
+	for _, h := range hits {
+		low := strings.ToLower(h.Name)
+		for _, w := range ws {
+			if strings.Contains(low, w) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+var (
+	listLink  = regexp.MustCompile(`(?i)^(torrents?|browse|browse torrents|search|search torrents|all torrents)$`)
+	notSearch = regexp.MustCompile(`(?i)(chat|shout|message|comment|post|reply|e-?mail|user|login)`)
+)
+
+// searchBox types the words into the page's search box, if it has one, and
+// returns what comes back. Only a field that is plainly a search is typed
+// into: a chat box would publish the words.
+func searchBox(ctx context.Context, p *page.Page, words string, pages int) (listing, bool) {
+	s, err := p.Snapshot(ctx)
+	if err != nil {
+		return listing{}, false
+	}
+	for _, e := range s.Elements {
+		if e.Kind != "input" || !e.Search || e.Password || notSearch.MatchString(e.Name) {
+			continue
+		}
+		if p.Type(ctx, e.Ref, words, true) != nil {
+			return listing{}, false
+		}
+		l, err := read(ctx, p, pages)
+		return l, err == nil
+	}
+	return listing{}, false
+}
+
 // find searches the site for the words. The first time it works out how:
-// through the site's own search box, or else at one of the usual addresses,
-// and it remembers the address that gave results.
+// through the site's own search box, on the front page or on its torrents
+// page, or else at one of the usual addresses; and it remembers the address
+// once that address has given results that match the words.
 func (t *tool) find(ctx context.Context, words string, pages int) (*page.Page, listing, error) {
 	var none listing
 	if err := t.needSite(); err != nil {
@@ -455,30 +506,40 @@ func (t *tool) find(ctx context.Context, words string, pages int) (*page.Page, l
 	if err != nil {
 		return nil, none, err
 	}
-	// The site's own search box, if the page has one.
-	if s, err := p.Snapshot(ctx); err == nil {
-		for _, e := range s.Elements {
-			if e.Kind != "input" || !e.Search || e.Password {
-				continue
+	// learn remembers the address of a search that worked, with {q} where the words are.
+	learn := func(l listing) {
+		for _, enc := range []string{url.QueryEscape(words), url.PathEscape(words), strings.ReplaceAll(words, " ", "+")} {
+			if i := strings.Index(strings.ToLower(l.URL), strings.ToLower(enc)); i >= 0 {
+				t.cfg.Search = l.URL[:i] + "{q}" + l.URL[i+len(enc):]
+				_ = saveJSON(configPath(), t.cfg)
+				return
 			}
-			if p.Type(ctx, e.Ref, words, true) != nil {
-				break
-			}
-			l, err := read(ctx, p, pages)
-			if err == nil && len(l.Hits) > 0 {
-				for _, enc := range []string{url.QueryEscape(words), url.PathEscape(words), strings.ReplaceAll(words, " ", "+")} {
-					if strings.Contains(l.URL, enc) {
-						t.cfg.Search = strings.Replace(l.URL, enc, "{q}", 1)
-						_ = saveJSON(configPath(), t.cfg)
-						break
-					}
-				}
-				return p, l, nil
-			}
-			break
 		}
 	}
-	var last listing
+	// The site's own search box: on the front page, or on the page its menu calls Torrents or Browse.
+	l, ok := searchBox(ctx, p, words, pages)
+	if !ok {
+		if s, err := p.Snapshot(ctx); err == nil {
+			for _, e := range s.Elements {
+				if e.Kind == "link" && e.Host == "" && listLink.MatchString(e.Name) {
+					if p.Click(ctx, e.Ref) == nil {
+						l, ok = searchBox(ctx, p, words, pages)
+					}
+					break
+				}
+			}
+		}
+	}
+	if ok { // the site's own search answered: what it says stands, results or none
+		if relevant(l.Hits, words) {
+			learn(l)
+		}
+		if len(l.Hits) == 0 || relevant(l.Hits, words) {
+			return p, l, nil
+		}
+		l.Hits = nil // a list that has nothing to do with the words is not an answer
+		return p, l, nil
+	}
 	for _, tmpl := range commonSearch {
 		if ctx.Err() != nil {
 			break
@@ -487,17 +548,15 @@ func (t *tool) find(ctx context.Context, words string, pages int) (*page.Page, l
 			continue
 		}
 		l, err := read(ctx, p, pages)
-		if err != nil {
+		if err != nil || !relevant(l.Hits, words) {
 			continue
 		}
-		last = l
-		if len(l.Hits) > 0 {
-			t.cfg.Search = tmpl
-			_ = saveJSON(configPath(), t.cfg)
-			return p, l, nil
-		}
+		t.cfg.Search = tmpl
+		_ = saveJSON(configPath(), t.cfg)
+		return p, l, nil
 	}
-	return p, last, nil
+	fmt.Fprintf(t.out, "THE SEARCH OF %s COULD NOT BE WORKED OUT: no search box was found and the usual addresses gave nothing for these words. Tell Chinmay exactly that. `novee-browse live` sends him a link to watch the browser.\n", t.cfg.Site)
+	return nil, none, errSaid
 }
 
 type lastSearch struct {
@@ -513,8 +572,17 @@ func lastPath() string { return filepath.Join(dataDir(), "last-search.json") }
 func (t *tool) results(ctx context.Context, o options) (*page.Page, []hit, int, error) {
 	words := strings.Join(o.words, " ")
 	p, l, err := t.find(ctx, words, o.pages)
+	if err == nil && len(l.Hits) > 0 && !relevant(l.Hits, words) && t.cfg.Search != "" {
+		// The remembered search address gives lists that ignore the words: it was wrong. Work it out again.
+		t.cfg.Search = ""
+		_ = saveJSON(configPath(), t.cfg)
+		p, l, err = t.find(ctx, words, o.pages)
+	}
 	if err != nil {
 		return nil, nil, 0, err
+	}
+	if !relevant(l.Hits, words) {
+		l.Hits = nil
 	}
 	hits := filter(l.Hits, o.must, o.exclude, o.minSeeds)
 	rank(hits, o.sort)
@@ -556,7 +624,7 @@ func (t *tool) search(ctx context.Context, args []string) error {
 		return err
 	}
 	if len(hits) == 0 {
-		fmt.Fprintf(t.out, "Verdict: NOTHING FOUND for %s on %s.\n", describe(o), t.cfg.Site)
+		fmt.Fprintf(t.out, "Verdict: NOTHING FOUND for %s on %s.\nSay that it is not on %s. Do not suggest other sites or other tools, and never a torrent client. If Chinmay doubts it, `novee-browse live` sends him a link to watch the browser.\n", describe(o), t.cfg.Site, t.cfg.Site)
 		return nil
 	}
 	by := map[string]string{"seeds": "most seeders first", "size": "largest first", "small": "smallest first", "new": "in the site's order", "name": "by name"}[o.sort]

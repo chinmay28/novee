@@ -73,6 +73,8 @@ Sign-in (Novee never types a password):
   login-request         send Chinmay a link to this browser so he signs in himself,
                         from his phone or PC. Done automatically when a page asks
                         for a password; use it to send a new link
+  live                  send Chinmay a link to watch this browser as it is, and to take
+                        over if he wants ("show me the browser", "what do you see")
 Owner only (opens a browser window):
   login URL             sign in to a site by hand; later commands are signed in
 
@@ -135,7 +137,7 @@ func (a *app) run(args []string) int {
 	cmds := map[string]func(context.Context, []string) (int, error){
 		"open": a.open, "snapshot": a.snapshot, "read": a.read, "find": a.find, "scroll": a.scroll, "back": a.back,
 		"click": a.click, "type": a.typeText, "select": a.selectOption, "screenshot": a.screenshot, "pdf": a.pdf,
-		"status": a.status, "close": a.closeSession, "login": a.login, "login-request": a.loginRequest,
+		"status": a.status, "close": a.closeSession, "login": a.login, "login-request": a.loginRequest, "live": a.live, "show": a.live, "watch": a.live,
 		"download":       a.download,
 		"costco-receipt": a.costcoReceipt, "costco-receipts": a.costcoReceipts, "costco-year-pdf": a.costcoYearPDF,
 		"doordash-receipt": a.doordashReceipt, "doordash-receipts": a.doordashReceipts, "doordash-year-pdf": a.doordashYearPDF, "doordash-spending": a.doordashSpending,
@@ -294,7 +296,7 @@ func (a *app) open(ctx context.Context, args []string) (int, error) {
 	}
 	want, mode := session.SiteProfile(url), session.Mode(*headed)
 	in, live := session.Current()
-	if v, ok := viewer.Current(); ok && live && in.Profile == want {
+	if v, ok := viewer.Current(); ok && live && in.Profile == want && !strings.HasPrefix(v.Site, "live:") {
 		// The owner may be typing his password on this very page: leave it alone.
 		fmt.Fprintf(a.out, "Chinmay was sent a sign-in link for %s %d minutes ago and may be signing in right now, so the page was NOT loaded again. This is what it shows:\n",
 			want, int(time.Since(v.Started).Minutes()))
@@ -853,4 +855,46 @@ func (a *app) helper(args []string) (int, bool) {
 		return exitError, true
 	}
 	return exitOK, true
+}
+
+// live lets the owner watch the browser, and steer it, through the same page
+// he signs in on. It is the answer to "show me what you see".
+func (a *app) live(ctx context.Context, _ []string) (int, error) {
+	var site string
+	if code, err := a.withPage(func(p *page.Page) (int, error) {
+		_, u, _, err := p.Where(ctx)
+		site = session.SiteProfile(u)
+		return exitOK, err
+	}); err != nil {
+		return code, err
+	}
+	const after = "Now reply to Chinmay: \"I sent you a link to watch my browser live.\" You can keep working; he sees every step. Do not say you cannot show the browser.\n"
+	if in, ok := viewer.Current(); ok {
+		fmt.Fprintf(a.out, "LIVE LINK: Chinmay already has a link to this browser, sent %d minutes ago and still valid. Do not send another.\n"+after, int(time.Since(in.Started).Minutes()))
+		return exitOK, nil
+	}
+	started := time.Now()
+	logPath := filepath.Join(session.Dir(), "viewer.log")
+	_ = os.Remove(logPath)
+	if err := session.Spawn("viewer", append(append([]string{}, a.viewer...), "live:"+site), logPath); err != nil {
+		return exitError, err
+	}
+	var in *viewer.Info
+	for deadline := time.Now().Add(10 * time.Second); in == nil && time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if v, ok := viewer.Current(); ok && !v.Started.Before(started) {
+			in = v
+		}
+	}
+	if in == nil {
+		tail, _ := os.ReadFile(logPath)
+		return exitError, fmt.Errorf("the live view did not start: %s", strings.TrimSpace(string(tail)))
+	}
+	text := fmt.Sprintf("Novee's browser, live (%s).\nOpen this on your home network: %s\nYou see what Novee sees and can click and type yourself. The link works for %d minutes; tap Done when you have seen enough.",
+		site, in.Link(), int(viewerLimit.Minutes()))
+	if err := notifyOwner(text); err != nil {
+		fmt.Fprintf(a.out, "LIVE LINK (send this to Chinmay exactly as written, on its own line):\n%s\n", in.Link())
+		return exitOK, nil
+	}
+	fmt.Fprintf(a.out, "LIVE LINK SENT to Chinmay in a separate message (valid %d minutes).\n"+after, int(viewerLimit.Minutes()))
+	return exitOK, nil
 }

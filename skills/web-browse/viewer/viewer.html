@@ -24,8 +24,10 @@
 </head>
 <body>
 <header>
-  <h1>Sign in to {{.Site}} for Novee</h1>
-  <p class="muted">This is the browser on your Novee machine. Tap the picture to click, type in the box below it. What you type goes straight into that browser; the assistant does not see it. The link works for about {{.Minutes}} minutes.</p>
+  {{if .Live}}<h1>Novee's browser, live ({{.Site}})</h1>
+  <p class="muted">This is what Novee's browser shows right now; it updates as Novee works. You can also take over: tap the picture to click, type in the box below it. The link works for about {{.Minutes}} minutes.</p>
+  {{else}}<h1>Sign in to {{.Site}} for Novee</h1>
+  <p class="muted">This is the browser on your Novee machine. Tap the picture to click, type in the box below it. What you type goes straight into that browser; the assistant does not see it. The link works for about {{.Minutes}} minutes.</p>{{end}}
   <p id="where" class="muted"></p>
 </header>
 <img id="screen" alt="The browser's screen">
@@ -40,7 +42,7 @@
     <button id="reload" title="If the page is blank or stuck">Reload</button>
   </div>
   <p id="msg" class="muted"></p>
-  <button id="done">Done, I am signed in</button>
+  <button id="done">{{if .Live}}Done watching{{else}}Done, I am signed in{{end}}</button>
 </footer>
 <script>
 const token = {{.Token}};
