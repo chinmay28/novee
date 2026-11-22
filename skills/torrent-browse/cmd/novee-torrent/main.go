@@ -73,6 +73,7 @@ type options struct {
 	limit     int
 	pages     int
 	must      []string
+	quality   []string
 	exclude   []string
 	get       bool
 	top       int
@@ -284,7 +285,7 @@ func parseOptions(args []string) (options, error) {
 		case "--quality":
 			var v string
 			if v, err = val(); err == nil {
-				o.must = append(o.must, v)
+				o.quality = append(o.quality, v)
 			}
 		case "--must":
 			var v string
@@ -649,7 +650,7 @@ func (t *tool) results(ctx context.Context, o options) (*page.Page, []hit, int, 
 	if !relevant(l.Hits, words) {
 		l.Hits = nil
 	}
-	hits := filter(l.Hits, o.must, o.exclude, o.minSeeds)
+	hits := ofQuality(filter(l.Hits, o.must, o.exclude, o.minSeeds), o.quality)
 	rank(hits, o.sort)
 	total := len(hits)
 	if len(hits) > o.limit {
@@ -667,6 +668,9 @@ func (t *tool) list(hits []hit) {
 
 func describe(o options) string {
 	s := fmt.Sprintf("%q", strings.Join(o.words, " "))
+	if len(o.quality) > 0 {
+		s += " in " + strings.Join(o.quality, ", ")
+	}
 	if len(o.must) > 0 {
 		s += " with " + strings.Join(o.must, ", ")
 	}
@@ -772,7 +776,7 @@ func (t *tool) latest(ctx context.Context, args []string) error {
 			break
 		}
 	}
-	hits := filter(l.Hits, o.must, o.exclude, o.minSeeds)
+	hits := ofQuality(filter(l.Hits, o.must, o.exclude, o.minSeeds), o.quality)
 	rank(hits, o.sort)
 	if len(hits) > o.limit {
 		hits = hits[:o.limit]

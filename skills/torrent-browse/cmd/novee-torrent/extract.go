@@ -188,6 +188,50 @@ next:
 	return out
 }
 
+// Release names write a picture quality in more than one way.
+var qualities = map[string]*regexp.Regexp{
+	"2160p": regexp.MustCompile(`(?i)\b(2160p?|4k)\b`),
+	"1080p": regexp.MustCompile(`(?i)\b1080[pi]?\b`),
+	"720p":  regexp.MustCompile(`(?i)\b720p?\b`),
+	"480p":  regexp.MustCompile(`(?i)\b(480p?|sd)\b`),
+}
+
+// ofQuality keeps the hits whose name states one of the qualities. "4k" and
+// "uhd" asked for mean 2160p; a name that says "1080p UHD" is a 1080p copy
+// made from a UHD disc, so "uhd" alone in a name does not count as 2160p.
+func ofQuality(hits []hit, want []string) []hit {
+	if len(want) == 0 {
+		return hits
+	}
+	var res []*regexp.Regexp
+	for _, q := range want {
+		q = strings.ToLower(strings.TrimSpace(q))
+		switch q {
+		case "4k", "uhd", "2160":
+			q = "2160p"
+		case "1080", "fhd", "1080i":
+			q = "1080p"
+		case "720", "hd":
+			q = "720p"
+		}
+		if re, ok := qualities[q]; ok {
+			res = append(res, re)
+		} else {
+			res = append(res, regexp.MustCompile(`(?i)`+regexp.QuoteMeta(q)))
+		}
+	}
+	var out []hit
+	for _, h := range hits {
+		for _, re := range res {
+			if re.MatchString(h.Name) {
+				out = append(out, h)
+				break
+			}
+		}
+	}
+	return out
+}
+
 // rank orders hits: by "seeds" (the default; most seeders first, then most
 // completed downloads), "size" (largest first), "small" (smallest first),
 // "new" (as the site listed them) or "name".

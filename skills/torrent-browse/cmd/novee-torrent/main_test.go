@@ -237,7 +237,7 @@ func TestTorrentTool(t *testing.T) {
 		t.Errorf("a search address that ignores the words must be dropped, got %q", cfg.Search)
 	}
 	_, got = run("search", "ubuntu")
-	_, got = run("search", "ubuntu", "--sort", "size", "--quality", "desktop", "--min-seeds", "1")
+	_, got = run("search", "ubuntu", "--sort", "size", "--must", "desktop", "--min-seeds", "1")
 	wants(got, "Verdict: 1 results", "1. Ubuntu 26.04 Desktop amd64 1080p | 5.8 GB")
 
 	// Is it out yet?
@@ -307,6 +307,20 @@ func TestTorrentTool(t *testing.T) {
 	wants(string(log), "Available now on", "Fedora 45 Workstation.zip")
 	_, got = run("watch", "list")
 	wants(got, "Nothing is being watched for.")
+}
+
+func TestQuality(t *testing.T) {
+	hits := []hit{{Name: "Some Film 2024 2160p WEB DL"}, {Name: "Some Film 2024 2160 Blu ray HEVC"}, {Name: "Some Film 2024 4K Remux"},
+		{Name: "Some Film 2011 1080p UHD BluRay DV HDR"}, {Name: "Some Film 2024 1080p DS4K WEBRip"}, {Name: "Some Film 2024 720p"}}
+	if got := ofQuality(hits, []string{"2160p"}); len(got) != 3 {
+		t.Errorf("2160p is also written 2160 and 4K, and a 1080p copy from a UHD disc is not it: %v", got)
+	}
+	if got := ofQuality(hits, []string{"4k"}); len(got) != 3 {
+		t.Errorf("4k asked for means 2160p: %v", got)
+	}
+	if got := ofQuality(hits, []string{"1080p"}); len(got) != 2 {
+		t.Errorf("1080p: %v", got)
+	}
 }
 
 func TestOnlyTorrentFiles(t *testing.T) {
