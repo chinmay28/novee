@@ -379,7 +379,7 @@ func (t *tool) login(ctx context.Context, _ []string) error {
 		return err
 	}
 	var l listing
-	if err := p.Eval(ctx, extractJS, &l); err != nil {
+	if err := p.Eval(ctx, extractor(""), &l); err != nil {
 		return err
 	}
 	fmt.Fprintf(t.out, "SIGNED IN: %s opens without asking for a sign-in (page: %s). Searches will work.\n", t.cfg.Site, l.Title)
@@ -403,12 +403,12 @@ func (t *tool) abs(path string) string {
 }
 
 // read extracts the list on the page, and the pages after it if asked.
-func read(ctx context.Context, p *page.Page, pages int) (listing, error) {
+func read(ctx context.Context, p *page.Page, words string, pages int) (listing, error) {
 	var all listing
 	for n := 1; ; n++ {
 		p.WaitContent(ctx, 8*time.Second)
 		var l listing
-		if err := p.Eval(ctx, extractJS, &l); err != nil {
+		if err := p.Eval(ctx, extractor(words), &l); err != nil {
 			return all, err
 		}
 		if n == 1 {
@@ -479,7 +479,7 @@ func searchBox(ctx context.Context, p *page.Page, words string, pages int) (list
 		if p.Type(ctx, e.Ref, words, true) != nil {
 			return listing{}, false
 		}
-		l, err := read(ctx, p, pages)
+		l, err := read(ctx, p, words, pages)
 		return l, err == nil
 	}
 	return listing{}, false
@@ -499,7 +499,7 @@ func (t *tool) find(ctx context.Context, words string, pages int) (*page.Page, l
 		if err != nil {
 			return nil, none, err
 		}
-		l, err := read(ctx, p, pages)
+		l, err := read(ctx, p, words, pages)
 		return p, l, err
 	}
 	p, err := t.visit(ctx, t.cfg.Site)
@@ -547,7 +547,7 @@ func (t *tool) find(ctx context.Context, words string, pages int) (*page.Page, l
 		if p.Goto(ctx, t.abs(strings.ReplaceAll(tmpl, "{q}", url.QueryEscape(words)))) != nil {
 			continue
 		}
-		l, err := read(ctx, p, pages)
+		l, err := read(ctx, p, words, pages)
 		if err != nil || !relevant(l.Hits, words) {
 			continue
 		}
@@ -697,7 +697,7 @@ func (t *tool) latest(ctx context.Context, args []string) error {
 		if i > 0 && p.Goto(ctx, t.abs(path)) != nil {
 			continue
 		}
-		if l, err = read(ctx, p, o.pages); err == nil && len(l.Hits) > 0 {
+		if l, err = read(ctx, p, "", o.pages); err == nil && len(l.Hits) > 0 {
 			if t.cfg.Latest == "" {
 				t.cfg.Latest = path
 				_ = saveJSON(configPath(), t.cfg)

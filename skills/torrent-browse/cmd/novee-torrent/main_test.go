@@ -67,7 +67,7 @@ func tracker() http.Handler {
 		fmt.Fprint(w, `<title>Tracker</title><main><h1>Welcome</h1><a href="/torrents-page">Torrents</a>
 <form action="/shout"><input name="chatbarText" value="This is a Shout Box not a Search engine!!"></form>
 <table><tr><th>Name</th><th>DL</th><th>Size</th><th>S</th><th>L</th></tr>
-<tr><td><a href="/details.php?id=90">Faces of Nothing 1978</a></td><td><a href="/download.php?id=1">DL</a></td><td>57 GB</td><td>3</td><td>0</td></tr></table></main>`)
+<tr><td><a href="/details.php?id=90">Old Release 1978</a></td><td><a href="/download.php?id=1">DL</a></td><td>57 GB</td><td>3</td><td>0</td></tr></table></main>`)
 	})
 	mux.HandleFunc("/shout", func(w http.ResponseWriter, r *http.Request) { shouted++ })
 	mux.HandleFunc("/torrents-page", func(w http.ResponseWriter, r *http.Request) {
@@ -84,7 +84,10 @@ func tracker() http.Handler {
 		}
 		q := strings.ToLower(r.URL.Query().Get("search"))
 		b := &strings.Builder{}
-		b.WriteString(`<title>Browse</title><main><table><tr><th>Type</th><th>Name</th><th>DL</th><th>Size</th><th><img alt="Snatched" src="x"></th><th>S</th><th><img title="Leechers" src="x"></th></tr>`)
+		// Above the results, a short list of featured torrents that has nothing to do with the search.
+		b.WriteString(`<title>Browse</title><main><table><tr><th>Name</th><th>DL</th><th>Size</th><th>S</th><th>L</th></tr>
+<tr><td><a href="/index.php?page=torrent-details&id=aa11">Featured Ubuntu Remix</a></td><td><a href="/download.php?id=1">DL</a></td><td>80 GB</td><td>999</td><td>0</td></tr></table>`)
+		b.WriteString(`<table><tr><th>Type</th><th>Name</th><th>DL</th><th>Size</th><th><img alt="Snatched" src="x"></th><th>S</th><th><img title="Leechers" src="x"></th></tr>`)
 		for _, t := range catalogue {
 			if !strings.Contains(strings.ToLower(t.name), q) {
 				continue
@@ -93,7 +96,7 @@ func tracker() http.Handler {
 			if t.magnet {
 				dl = `<a href="magnet:?xt=urn:btih:abc">M</a>`
 			}
-			fmt.Fprintf(b, `<tr><td>Apps</td><td><a href="/details.php?id=%d">%s</a></td><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>`,
+			fmt.Fprintf(b, `<tr><td>Apps</td><td><a href="/index.php?page=torrent-details&id=e%dc154647">%s</a> <a href="/index.php?page=userdetails&id=255718">an-uploader-with-a-long-name-to-outweigh-the-title</a></td><td>%s</td><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>`,
 				t.id, t.name, dl, t.size, t.snatched, t.seeds, t.leech)
 		}
 		b.WriteString(`</table></main>`)
@@ -107,6 +110,9 @@ func tracker() http.Handler {
 		}
 		w.Header().Set("Content-Type", "application/x-bittorrent")
 		_, _ = w.Write(torrentFile(catalogue[id-1].name))
+	})
+	mux.HandleFunc("/index.php", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `<title>Details</title><main><h1>Torrent %s</h1><p>Files: 1. Official image.</p></main>`, r.URL.Query().Get("id"))
 	})
 	mux.HandleFunc("/details.php", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `<title>Details</title><main><h1>Torrent %s</h1><p>Files: 1. Official image.</p></main>`, r.URL.Query().Get("id"))
@@ -156,7 +162,7 @@ func TestTorrentTool(t *testing.T) {
 			return "", err
 		}
 		var l listing
-		if err := p.Eval(ctx, extractJS, &l); err != nil {
+		if err := p.Eval(ctx, extractor(""), &l); err != nil {
 			return "", err
 		}
 		if l.Password {

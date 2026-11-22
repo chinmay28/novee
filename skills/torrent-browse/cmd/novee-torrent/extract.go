@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -38,10 +39,12 @@ type listing struct {
 // that say so in words, letters or little pictures. So: find the download
 // links, take the row around each, name the columns from the header row, and
 // where a header says nothing fall back on what the cells look like.
-const extractJS = `(() => {
+const extractJS = `((WORDS) => {
   const clean = s => (s || '').replace(/\s+/g, ' ').trim();
   const dlRe = /(download\.php|\/download\/|\/download\?|\/dl\/|\.torrent(\?|$)|action=download|torrents\/download|\/get\/)/i;
-  const detRe = /(details?\.php|torrents?\.php\?.*\bid=|[?&]id=\d+|\/torrents?\/\d+|\/torrent\/[^/]+|\/t\/\d+|\/details\/)/i;
+  const detRe = /(details?\.php|torrent[-_]?details|torrents?\.php\?.*\bid=|\/torrents?\/\d+|\/torrent\/[^/]+|\/t\/\d+|\/details\/)/i;
+  // Links in a row that are about something else than the torrent itself: its uploader, its peers, its category.
+  const otherRe = /(user|member|profile|peers|history|categor|comment|imdb\.com|tmdb|tvdb|page=torrents&|[?&]cat=)/i;
   const sizeRe = /(\d+(?:[.,]\d+)?)\s*(bytes|B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)\b/i;
   const rowOf = a => a.closest('tr') || a.closest('li, article, [class*=torrent], [class*=result], [class*=row]');
   const rows = new Map();
@@ -78,19 +81,31 @@ const extractJS = `(() => {
     headers.set(table, m); return m;
   };
   const int = s => { const m = clean(s).replace(/[,.\s](?=\d{3}\b)/g, '').match(/^\d+$/); return m ? parseInt(m[0], 10) : -1; };
+  // A page often shows other lists too (featured, recommended, newest). The results are the list
+  // whose rows mention the searched words most; with no words, the longest list.
+  const groups = new Map();
+  for (const row of rows.keys()) {
+    const g = row.closest('table') || row.parentElement, low = (row.innerText || '').toLowerCase();
+    const n = groups.get(g) || 0;
+    groups.set(g, n + 1 + 1000 * (WORDS || []).filter(w => low.includes(w)).length);
+  }
+  let main = null, most = 0;
+  for (const [g, n] of groups) if (n >= most) { main = g; most = n; } // on a tie the later list: results come below what is featured
+  for (const row of Array.from(rows.keys())) if ((row.closest('table') || row.parentElement) !== main) rows.delete(row);
   const hits = [];
   for (const [row, how] of rows) {
     if (row.querySelector('th') && !row.querySelector('td')) continue;
     const cells = Array.from(row.children), table = row.closest('table'), cols = table ? colsOf(table) : {};
     const cell = k => cols[k] !== undefined && cells[cols[k]] ? cells[cols[k]] : null;
     // The name is the longest link text that leads to the torrent's own page.
-    let name = '', details = '';
+    let name = '', details = '', best = null;
     for (const a of row.querySelectorAll('a[href]')) {
       const h = a.getAttribute('href') || '', t = clean(a.innerText || a.getAttribute('title'));
       if (dlRe.test(h) || /^magnet:/i.test(h) || t.length < 3) continue;
-      const weight = t.length + (detRe.test(h) ? 1000 : 0);
-      if (weight > (name.length + (details && detRe.test(details) ? 1000 : 0))) { name = t; details = a.href; }
+      const score = l => l.t.length + (detRe.test(l.h) ? 1000 : 0) - (otherRe.test(l.h) ? 2000 : 0);
+      if (!best || score({t: t, h: h}) > score(best)) best = {t: t, h: h, href: a.href};
     }
+    if (best) { name = best.t; details = best.href; }
     if (!name) continue;
     let size = '';
     const sc = cell('size');
@@ -111,7 +126,20 @@ const extractJS = `(() => {
   }
   const password = Array.from(document.querySelectorAll('input[type=password]')).some(e => e.offsetParent !== null);
   return {title: document.title, url: location.href, password: password, hits: hits};
-})()`
+})`
+
+// extractor is the script that reads the page's list; words are what was
+// searched for, if anything, and decide which list on the page is the answer.
+func extractor(words string) string {
+	var ws []string
+	for _, w := range strings.Fields(strings.ToLower(words)) {
+		if len(w) >= 3 {
+			ws = append(ws, w)
+		}
+	}
+	list, _ := json.Marshal(ws)
+	return extractJS + "(" + string(list) + ")"
+}
 
 var sizeUnit = regexp.MustCompile(`(?i)^(\d+(?:[.,]\d+)?)\s*(bytes|B|KB|MB|GB|TB|KiB|MiB|GiB|TiB)$`)
 
