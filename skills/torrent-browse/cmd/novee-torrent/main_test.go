@@ -272,6 +272,8 @@ func TestTorrentTool(t *testing.T) {
 	_, got = run("grab", "debian", "--no-send")
 	wants(got, "Best of 1 results", "Verdict: FETCHED 1 of 1", "NOT sent", "novee-torrent send --last 1")
 	// "Send me all of them as a zip": what was fetched goes out again as one archive, by one command.
+	_, got = run("fetched")
+	wants(got, "most recently fetched .torrent files", "1. Debian 14 netinst (fetched ", "novee-torrent send --last K")
 	_, got = run("send", "--last", "3")
 	wants(got, "ZIP SENT to Chinmay in a separate message: 3 .torrent files")
 	_, got = run("send")

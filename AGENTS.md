@@ -76,7 +76,7 @@ Torrent questions ("my tracker", "is X available yet", "is X out", "find a torre
 - `novee-torrent check WORDS`: is it available yet.
 - `novee-torrent search WORDS`: the results, best first, with size, seeders and leechers. Add `--quality 1080p` or `--min-seeds 5` when Chinmay says so.
 - `novee-torrent grab WORDS`: find it and send Chinmay the best .torrent file. `novee-torrent get 1 2 3` (or `get --top 3`) sends results of the last search. Files always go to him as a zip, sent by the tool.
-- "Send them", "download all 4", "give me the files", "as a zip": the files are already fetched, so run `novee-torrent send --last 4` (the number he means). It sends them as one zip. Never build an archive yourself with `zip`, `tar` or `ls`, and never tell him to use a torrent client.
+- "Send them", "download all 4", "give me the files", "as a zip", "the ones from before": the files are already fetched. Run `novee-torrent fetched` if you are not sure which they are, then `novee-torrent send --last 4` (the number he means). It sends them as one zip. Do not search or fetch again for this, and never pick other torrents to make up the number. Never build an archive yourself with `zip`, `tar` or `ls`, and never tell him to use a torrent client.
 - Run one `novee-torrent` command at a time and read its result before the next.
 - `novee-torrent watch add WORDS`: tell Chinmay when it appears. `novee-torrent latest`: what is new.
 - `novee-torrent` is an installed program. Do not look for a script or a folder, do not use `web_search` for this, and do not say you have no access.

@@ -33,6 +33,7 @@ Hard rule: only `.torrent` files are ever fetched, a few kilobytes that describe
 - `latest`: what the site added most recently.
 - `info N`: the page of result N of the last search (description, files).
 - `get N` / `get 1 2 3` / `get --top 3`: fetch those results of the last search and send them to Chinmay. They always go as a zip (a chat does not take bare .torrent files), one zip per command.
+- `fetched`: the files fetched lately, newest first, and whether each was sent. Look here when Chinmay says "those", "the ones from before", "all 4".
 - `send --last K`: send the last K fetched files again as ONE zip. `send` alone sends whatever was fetched and not sent yet. Use it for "send them all", "download all 4", "give me the zip".
 - `grab WORDS`: search and send the best result in one step. Use it when Chinmay names exactly what he wants.
 - `watch add WORDS`: check a few times a day and message Chinmay when it appears. With `--get` the file is sent too. `watch list`, `watch remove N`.

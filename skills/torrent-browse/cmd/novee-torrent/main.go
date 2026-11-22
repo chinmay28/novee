@@ -37,6 +37,7 @@ Find:
   latest [options]           what the site added most recently
   info N                     the page of result N: description, files, details
 Fetch (the .torrent files go to Chinmay in the chat as a zip; a chat does not take bare .torrent files):
+  fetched                    the files fetched lately, newest first
   send                       send what was fetched and not sent yet, as one zip
   send --last K              send the last K fetched files again, as one zip
   get N [N ...]              results N of the last search
@@ -160,12 +161,13 @@ func (t *tool) run(args []string) int {
 	loadJSON(configPath(), &t.cfg)
 	cmds := map[string]func(context.Context, []string) error{
 		"site": t.site, "login": t.login, "search": t.search, "check": t.check, "latest": t.latest, "info": t.info,
-		"get": t.get, "grab": t.grab, "send": t.send, "watch": t.watch, "status": t.status,
+		"get": t.get, "grab": t.grab, "send": t.send, "fetched": t.fetchedList, "watch": t.watch, "status": t.status,
 	}
 	// Words a model reaches for instead of the command names.
 	alias := map[string]string{"find": "search", "track": "search", "lookup": "search", "query": "search", "browse": "search",
 		"available": "check", "availability": "check", "is-available": "check", "exists": "check",
-		"download": "get", "fetch": "get", "zip": "send", "bundle": "send", "sendall": "send", "send-all": "send", "resend": "send", "new": "latest", "recent": "latest", "details": "info", "notify": "watch"}
+		"download": "get", "fetch": "get", "zip": "send", "bundle": "send", "sendall": "send", "send-all": "send", "resend": "send", "new": "latest", "details": "info", "notify": "watch",
+		"recent": "fetched", "history": "fetched", "downloads": "fetched", "downloaded": "fetched", "files": "fetched", "list": "fetched"}
 	if to, ok := alias[args[0]]; ok {
 		args[0] = to
 	}
@@ -888,7 +890,7 @@ func (t *tool) sendZip(files []string, what string) error {
 	for _, f := range files {
 		_ = os.WriteFile(f+".sent", nil, 0o600)
 	}
-	fmt.Fprintf(t.out, "ZIP SENT to Chinmay in a separate message: %d .torrent files in %s. Tell him that in one or two lines. Run no more commands.\n", len(files), filepath.Base(path))
+	fmt.Fprintf(t.out, "ZIP SENT to Chinmay in a separate message: %d .torrent files in %s. Tell him that in one or two lines. Run no more commands.\n(If he later wants several fetched files together: `novee-torrent fetched` lists them, `novee-torrent send --last K` sends the newest K as one zip.)\n", len(files), filepath.Base(path))
 	return nil
 }
 
@@ -915,6 +917,32 @@ func fetched() []string {
 		}
 	}
 	return out
+}
+
+// fetchedList shows what was fetched lately, so that "send me those" has something to point at.
+func (t *tool) fetchedList(_ context.Context, _ []string) error {
+	all := fetched()
+	if len(all) == 0 {
+		fmt.Fprintln(t.out, "No .torrent files have been fetched yet.")
+		return nil
+	}
+	if len(all) > 20 {
+		all = all[:20]
+	}
+	fmt.Fprintf(t.out, "The %d most recently fetched .torrent files, newest first:\n", len(all))
+	for i, f := range all {
+		state := "not sent yet"
+		if _, err := os.Stat(f + ".sent"); err == nil {
+			state = "sent"
+		}
+		when := ""
+		if st, err := os.Stat(f); err == nil {
+			when = st.ModTime().Format("01/02 15:04")
+		}
+		fmt.Fprintf(t.out, "%d. %s (fetched %s, %s)\n", i+1, strings.TrimSuffix(filepath.Base(f), ".torrent"), when, state)
+	}
+	fmt.Fprintln(t.out, "To send Chinmay the newest K of these as one zip: novee-torrent send --last K. Do not fetch anything again for that.")
+	return nil
 }
 
 // send sends files that were fetched earlier: the ones not sent yet, or the last K.
