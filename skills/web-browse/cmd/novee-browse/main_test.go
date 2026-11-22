@@ -203,6 +203,22 @@ func TestBrowseEndToEnd(t *testing.T) {
 		return m[1]
 	}
 
+	// A command this program does not have goes to a companion program, if there is one.
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "novee-hello"), []byte("#!/bin/sh\necho \"hello got: $*\"\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	if code, got := run("hello-say", "a", "b"); code != exitOK || !strings.Contains(got, "hello got: say a b") {
+		t.Errorf("helper by NAME-COMMAND: %d %s", code, got)
+	}
+	if code, got := run("hello", "say"); code != exitOK || !strings.Contains(got, "hello got: say") {
+		t.Errorf("helper by NAME COMMAND: %d %s", code, got)
+	}
+	if code, got := run("nosuch-thing"); code != exitError || !strings.Contains(got, "unknown command") {
+		t.Errorf("no helper: %d %s", code, got)
+	}
+
 	if code, got := run("snapshot"); code != exitError || !strings.Contains(got, "no page is open") {
 		t.Fatalf("before open: %d %s", code, got)
 	}

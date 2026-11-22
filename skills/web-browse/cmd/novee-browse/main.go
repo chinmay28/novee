@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"regexp"
@@ -142,6 +143,9 @@ func (a *app) run(args []string) int {
 	}
 	cmd, ok := cmds[args[0]]
 	if !ok {
+		if code, ran := a.helper(args); ran {
+			return code
+		}
 		fmt.Fprintf(a.out, "ERROR: unknown command %q. Run novee-browse without arguments for the list.\n", args[0])
 		return exitError
 	}
@@ -816,4 +820,37 @@ func (a *app) requestSignIn(site string, auto bool) error {
 	}
 	fmt.Fprintf(a.out, "SIGN-IN LINK SENT to Chinmay in a separate message (valid %d minutes).\n"+after, int(viewerLimit.Minutes()), site)
 	return nil
+}
+
+// helper hands a command this program does not know to a companion program,
+// if one is installed: "NAME-COMMAND ..." and "NAME COMMAND ..." both run
+// "novee-NAME COMMAND ...". A small model that has learned to reach for
+// novee-browse finds tools built on it this way.
+func (a *app) helper(args []string) (int, bool) {
+	name, rest := args[0], args[1:]
+	if i := strings.Index(name, "-"); i > 0 {
+		name, rest = name[:i], append([]string{name[i+1:]}, rest...)
+	}
+	if !regexp.MustCompile(`^[a-z]{2,20}$`).MatchString(name) || name == "browse" {
+		return 0, false
+	}
+	exe, err := exec.LookPath("novee-" + name)
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		exe = filepath.Join(home, ".local", "bin", "novee-"+name)
+		if _, err := os.Stat(exe); err != nil {
+			return 0, false
+		}
+	}
+	cmd := exec.Command(exe, rest...)
+	cmd.Stdout, cmd.Stderr, cmd.Stdin = a.out, a.out, nil
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			return ee.ExitCode(), true
+		}
+		fmt.Fprintln(a.out, "ERROR:", err)
+		return exitError, true
+	}
+	return exitOK, true
 }
