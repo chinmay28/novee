@@ -124,6 +124,14 @@ The answers read the same as Costco's (`Verdict:`, `PDF SENT`, `NOT sent`, `STAR
 
 Signing in to Uber asks for a phone number or e-mail and then a code, not always a password. The tool sends Chinmay the sign-in link for that too.
 
+## PG&E energy statements
+
+- `novee-browse pge-bill last` (or `pge-bill 11/13/2026`, or a month: `pge-bill 11/2026`): one statement read in full. PG&E's electric charges line by line, the generation charges of the community provider with their rates per kWh, electricity taken from and sent to the grid, the net energy metering (NEM) detail with peak and off-peak rates and credits, the estimated true-up, and gas use with the rate per therm of each tier. The PDF is sent to Chinmay.
+- `novee-browse pge-bills 2026`: the statements of a year with their amounts.
+- `novee-browse pge-report 2026`: the year analysed and sent to Chinmay by the tool, with a file that has one line per statement. Three parts: the bills month by month (charges, electric, generation, gas, corrections, climate credit); electricity and solar (from grid, to grid, net, rates, NEM charges and credits per period, the year-to-date NEM table and the estimate owed at the true-up); gas (therms, therms a day, cost per therm, tier rates). A background job; a few minutes the first time for a year.
+
+How to answer: for one bill, start from the `Verdict:` line and quote the lines Chinmay asked about exactly. For the report, reply what the output says and stop; the analysis reaches him directly. Two things to know when he asks: with solar on NEM the monthly NEM charges are not billed each month but settled once a year at the true-up; and "to grid" is only the solar power not used in the house, the panels' total production is not on a PG&E bill.
+
 ## Examples
 
 Chinmay: "Open my Costco orders and tell me what my last warehouse trip cost."

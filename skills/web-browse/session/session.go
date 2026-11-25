@@ -176,6 +176,34 @@ func targets(port int) ([]targetInfo, error) {
 	return ts, json.NewDecoder(resp.Body).Decode(&ts)
 }
 
+// Tab is an open tab of the browser.
+type Tab struct {
+	ID, URL string
+}
+
+// Tabs lists the open tabs.
+func Tabs(in *Info) []Tab {
+	ts, err := targets(in.Port)
+	if err != nil {
+		return nil
+	}
+	var out []Tab
+	for _, t := range ts {
+		if t.Type == "page" {
+			out = append(out, Tab{t.ID, t.URL})
+		}
+	}
+	return out
+}
+
+// CloseTab closes a tab.
+func CloseTab(in *Info, id string) {
+	c := http.Client{Timeout: 3 * time.Second}
+	if resp, err := c.Get(fmt.Sprintf("http://127.0.0.1:%d/json/close/%s", in.Port, id)); err == nil {
+		resp.Body.Close()
+	}
+}
+
 // PageTarget returns the id of the tab commands work in: the newest page.
 func PageTarget(in *Info) (string, error) {
 	ts, err := targets(in.Port)

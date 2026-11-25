@@ -69,6 +69,17 @@ type Snapshot struct {
 // element into an Element.
 const describe = `
 const __clean = s => (s || '').replace(/\s+/g, ' ').trim();
+// Every element under root that matches, also inside the shadow trees of web
+// components (sign-in forms built with them keep their fields there).
+const __deep = (root, sel) => {
+  const out = [];
+  const walk = r => {
+    for (const el of r.querySelectorAll(sel)) out.push(el);
+    for (const el of r.querySelectorAll('*')) if (el.shadowRoot) walk(el.shadowRoot);
+  };
+  walk(root);
+  return out;
+};
 // The pop-up that is open on top of the page, if any.
 const __dialog = () => {
   const ds = Array.from(document.querySelectorAll('dialog[open],[role=dialog],[role=alertdialog],[aria-modal=true]')).filter(d => {
@@ -117,10 +128,10 @@ const __nv = (el, ref) => {
 const snapshotJS = `(() => {` + describe + `
   const sel = 'a[href],button,input:not([type=hidden]),select,textarea,summary,[role=button],[role=link],[role=tab],' +
     '[role=menuitem],[role=checkbox],[role=radio],[role=option],[role=combobox],[role=searchbox],[onclick],[contenteditable=true]';
-  document.querySelectorAll('[data-novee-ref]').forEach(e => e.removeAttribute('data-novee-ref'));
+  __deep(document, '[data-novee-ref]').forEach(e => e.removeAttribute('data-novee-ref'));
   const dlg = __dialog();
   const out = [], nodes = []; let n = 0;
-  for (const el of (dlg || document).querySelectorAll(sel)) {
+  for (const el of __deep(dlg || document, sel)) {
     const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
     if (r.width < 1 || r.height < 1 || cs.visibility === 'hidden' || cs.display === 'none' || el.disabled ||
         el.closest('[aria-hidden=true]')) continue;
@@ -156,7 +167,7 @@ const snapshotJS = `(() => {` + describe + `
 
 func lookupJS(ref int) string {
 	return fmt.Sprintf(`(() => {%s
-  const el = document.querySelector('[data-novee-ref="%d"]');
+  const el = __deep(document, '[data-novee-ref="%d"]')[0];
   return el ? __nv(el, %d) : null;
 })()`, describe, ref, ref)
 }

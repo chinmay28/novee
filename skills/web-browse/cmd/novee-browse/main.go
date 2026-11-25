@@ -69,6 +69,13 @@ Uber Eats (the same four, for Uber Eats orders; its stored money is Uber Cash):
   ubereats-receipts [YEAR]
   ubereats-year-pdf all | YEAR
   ubereats-spending YEAR
+PG&E energy statements (needs Chinmay signed in to PG&E):
+  pge-bill last | MM/DD/YYYY   one statement in full: electric, generation, gas, every line and rate;
+                               the PDF goes to Chinmay
+  pge-bills [YEAR]             the statements of a year with their totals
+  pge-report YEAR              the year analysed: bills, electricity from and to the grid, rates per
+                               kWh, net energy metering and true-up, gas and rates per therm;
+                               sent to Chinmay when ready (background). Also: status
 Sign-in (Novee never types a password):
   login-request         send Chinmay a link to this browser so he signs in himself,
                         from his phone or PC. Done automatically when a page asks
@@ -141,6 +148,7 @@ func (a *app) run(args []string) int {
 		"download":       a.download,
 		"costco-receipt": a.costcoReceipt, "costco-receipts": a.costcoReceipts, "costco-year-pdf": a.costcoYearPDF,
 		"doordash-receipt": a.doordashReceipt, "doordash-receipts": a.doordashReceipts, "doordash-year-pdf": a.doordashYearPDF, "doordash-spending": a.doordashSpending,
+		"pge-bill": a.pgeBill, "pge-bills": a.pgeBills, "pge-report": a.pgeReport,
 		"ubereats-receipt": a.ubereatsReceipt, "ubereats-receipts": a.ubereatsReceipts, "ubereats-year-pdf": a.ubereatsYearPDF, "ubereats-spending": a.ubereatsSpending,
 	}
 	cmd, ok := cmds[args[0]]
@@ -151,13 +159,13 @@ func (a *app) run(args []string) int {
 		fmt.Fprintf(a.out, "ERROR: unknown command %q. Run novee-browse without arguments for the list.\n", args[0])
 		return exitError
 	}
-	if job, ok := currentJob(); ok && args[0] != "status" && !strings.HasSuffix(args[0], "-year-pdf") && !strings.HasSuffix(args[0], "-spending") {
+	if job, ok := currentJob(); ok && args[0] != "status" && !strings.HasSuffix(args[0], "-year-pdf") && !strings.HasSuffix(args[0], "-spending") && args[0] != "pge-report" {
 		// The job is clicking through the same page.
 		fmt.Fprintf(a.out, "BUSY: a background job is using the browser (%s). Chinmay gets its result in the chat when it is done. Do not run browser commands until then; to check: novee-browse %s-year-pdf status\n", job.describe(), job.Store)
 		return exitError
 	}
 	limit := 90 * time.Second
-	if strings.HasPrefix(args[0], "costco-") || strings.HasPrefix(args[0], "doordash-") || strings.HasPrefix(args[0], "ubereats-") { // several pages are clicked through
+	if strings.HasPrefix(args[0], "costco-") || strings.HasPrefix(args[0], "doordash-") || strings.HasPrefix(args[0], "ubereats-") || strings.HasPrefix(args[0], "pge-") { // several pages are clicked through
 		limit = 4 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), limit)

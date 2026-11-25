@@ -87,7 +87,7 @@ func parseYears(args []string) (map[int]bool, string, error) {
 	return want, strings.Join(names, ","), nil
 }
 
-var storeName = map[string]string{"costco": "Costco", "doordash": "DoorDash", "ubereats": "Uber Eats"}
+var storeName = map[string]string{"costco": "Costco", "doordash": "DoorDash", "ubereats": "Uber Eats", "pge": "PG&E"}
 
 func (a *app) costcoYearPDF(ctx context.Context, args []string) (int, error) {
 	return a.yearPDF(ctx, "costco", args)
@@ -171,7 +171,13 @@ func costcoJobMain(arg string) int {
 	want, names, err := parseYears(strings.Split(years, ","))
 	if err == nil {
 		job.Years = names
-		if sh, spending := shops[strings.TrimSuffix(store, "-spending")], strings.HasSuffix(store, "-spending"); sh != nil && spending {
+		if store == "pge-report" {
+			job.Store = "pge"
+			job.save()
+			for y := range want {
+				err = a.runPGEReport(ctx, job, y)
+			}
+		} else if sh, spending := shops[strings.TrimSuffix(store, "-spending")], strings.HasSuffix(store, "-spending"); sh != nil && spending {
 			err = a.runShopSpending(ctx, sh, job, want)
 		} else if sh != nil {
 			err = a.runShopJob(ctx, sh, job, want)

@@ -151,6 +151,8 @@ DoorDash has the same three commands (`doordash-receipt`, `doordash-receipts`, `
 
 Uber Eats has the same commands with `ubereats-`. Its receipts are a framed document in a pop-up on the past orders page, which the page reader now includes and `pdf` prints whole; "Uber Cash" under Payments is its stored money. Its sign-in asks for a phone number or e-mail and a code, so a page counts as a sign-in page when its address or title says so and it asks for either, password or not. What a shop needs (its list, its receipt, its word for credits) is one entry in `shops` in `doordash.go`; the receipt, yearly PDF and spending commands are shared.
 
+PG&E statements have `pge-bill`, `pge-bills` and `pge-report`. A statement is fetched as the PDF the billing history builds for "View Bill PDF" (taken at the moment the page makes it, since it is shown in a new tab and not downloaded), kept in `pge-bills/` next to the session file, and turned into text with `pdftotext -layout` (`sudo apt install poppler-utils`); the `pge` package reads that text page by page. PG&E's pages are web components, so the page reader looks inside shadow trees for fields, links and buttons.
+
 Two things protect the sign-in. While a link is live, `open` on that site shows the page as it is instead of loading it again, so the model cannot pull the page away while the owner types. And when a sign-in page comes up empty, `open` deletes that site's browser profile and tries once with a fresh one: Costco's bot protection serves a page that draws nothing to a profile that has visited the sign-in page repeatedly without signing in, and a profile sitting on a sign-in page has no sign-in to lose.
 
 The old way still works from a desktop on the LAN (needs `xauth`); close the window when done:

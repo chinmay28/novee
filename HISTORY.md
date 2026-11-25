@@ -92,3 +92,9 @@ A short log of how Novee was built. Dates are 2026.
 - The files never arrived: OpenClaw sends images, documents and archives from disk but not a bare `.torrent` file, so every fetch ended "saved but not sent" and the model fell back on `ls`, `zip` and `tar`, each one an approval request. Files now always travel as a zip, and `send --last K` sends what was already fetched as one archive. Two fetches the model started at the same moment had also read each other's pages; commands now wait for one another.
 - "Part 3 is not available" was wrong: it was on the second page of the results. The tool read one page; it now follows the site's "Next" link through every page (ten at most), whatever the link is called after the word Next.
 - One part of a series did not exist in the quality asked for, and the model left it out of the zip. The owner's rule: take the best of the next quality down, as long as he is told. `--quality` now falls back that way with a `NOTE:`, and `parts NAME` picks one torrent per part of a series by that rule.
+
+## November 24: PG&E bills
+
+- Novee learned to read PG&E energy statements: the electric and gas charges, a community provider's generation charges, the rates per kWh and per therm, what a home with solar took from and sent to the grid, and the net energy metering balance up to the true-up.
+- The account site is built from web components, whose fields live in shadow trees that the page reader did not look into; it does now, which is also what let the sign-in page be recognised. A bill is not downloaded there but built in the page and shown in a new tab, so the file is taken at the moment the page makes it.
+- The statement's text is read by a small package with one test statement that is entirely made up. A year of statements becomes three chat messages: the bills, electricity and solar, gas.

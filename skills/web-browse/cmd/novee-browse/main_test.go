@@ -153,6 +153,25 @@ if (location.hash !== '#again') localStorage.setItem('seen', '1');</script>`)
 <div><a href="/store/x">Fire Wings</a><div>1 item for $0.00</div><div>•</div><div>Canceled on %s at 8:10 PM</div><div>•</div><a href="/ubereats?mod=orderReceipt&modctx=u3">View receipt</a></div>
 </main>%s`, ueNow.Format("Jan 02"), ueNow.Format("Jan 02"), ueNow.Format("Jan 02"), receipt)
 	})
+	// A sign-in form inside the shadow tree of a web component, as component frameworks build them.
+	mux.HandleFunc("/login/component", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `<title>Login</title><main><h1>Sign in</h1><x-login></x-login></main><script>
+customElements.define('x-login', class extends HTMLElement { connectedCallback() {
+  this.attachShadow({mode: 'open'}).innerHTML = '<input aria-label="Username"><input type="password" aria-label="Password"><button>Sign In</button>'; } });</script>`)
+	})
+	// A billing history like PG&E's: payments and bills mixed, two bills to a page behind a
+	// page-number box, and a "View Bill PDF" link that builds the file in the page and opens it in a new tab.
+	mux.HandleFunc("/pge", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `<title>Bill And Payment History</title><main><h1>Billing and payment history</h1><div id="rows"></div>
+<span>Jump to</span> <button role="combobox" id="box" onclick="document.getElementById('opts').hidden = false">1</button>
+<div id="opts" role="listbox" hidden><div role="option" onclick="go(0)">1</div><div role="option" onclick="go(1)">2</div></div> of 2</main><script>
+const bills = [['11/13/%d', '$199.47'], ['10/14/%d', '$122.05'], ['04/15/%d', '$-184.48'], ['12/15/%d', '$301.59']];
+function go(n) { document.getElementById('opts').hidden = true; document.getElementById('box').innerText = n + 1;
+  document.getElementById('rows').innerHTML = '<div><span>11/17/%d</span> <span>Payment</span> <span>Processed</span> <span>$199.47</span></div>' +
+    bills.slice(n * 2, n * 2 + 2).map((b, i) => '<div><span>' + b[0] + '</span> <span>Bill Charges</span> <a href="javascript:void(0)" onclick="view(' + (n * 2 + i) + ')">View Bill PDF</a> <span>' + b[1] + '</span></div>').join(''); }
+function view(i) { const url = URL.createObjectURL(new Blob(['%%PDF-1.7 statement ' + bills[i][0]], {type: 'application/pdf'})); window.open(url, '_blank'); }
+go(0);</script>`, ueNow.Year(), ueNow.Year(), ueNow.Year(), ueNow.Year()-1, ueNow.Year())
+	})
 	mux.HandleFunc("/ordered", func(w http.ResponseWriter, r *http.Request) { ordered.Add(1) })
 	mux.HandleFunc("/note", func(w http.ResponseWriter, r *http.Request) {
 		noted.Add(1)
@@ -428,6 +447,50 @@ func TestBrowseEndToEnd(t *testing.T) {
 			}
 		}
 	}
+	// PG&E: statements are listed over two pages, fetched as the PDFs the page builds, and read as text.
+	t.Setenv("NOVEE_PGE_URL", srv.URL+"/pge")
+	fakeText := filepath.Join(t.TempDir(), "pdftotext")
+	// The stand-in "reads" a PDF by printing a statement dated like the file is named.
+	script := "#!/bin/sh\nd=$(basename \"$2\" .pdf); y=${d%%-*}; md=${d#*-}; m=${md%-*}; dd=${md#*-}\n" +
+		"printf ' Statement Date:    %s/%s/%s\\n Due Date:     12/04/2026\\n Your Account Summary\\n  Amount Due on Previous Statement      $1.00\\n" +
+		"  Current PG&E Electric Monthly Charges      $24.23\\n  Current Gas Charges      160.73\\n  Total Amount Due by 12/04/2026      $184.96\\n\\f Details of Gas Charges\\n" +
+		"10/08/2026 to 11/05/2026 (29 billing days)\\n      Total Usage      53.000000 Therms\\nTier 1 Usage      11.760000 Therms@ $2.42480      $28.52\\nTotal Gas Charges      $160.73\\n' \"$m\" \"$dd\" \"$y\"\n"
+	if err := os.WriteFile(fakeText, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NOVEE_PDFTOTEXT", fakeText)
+	_, got = run("pge-bills")
+	wants(got, "Verdict: 3 PG&E statements dated "+fmt.Sprint(now.Year()), "- 11/13/"+fmt.Sprint(now.Year())+": $199.47", "- 04/15/"+fmt.Sprint(now.Year())+": $-184.48")
+	_, got = run("pge-bill", "04/"+fmt.Sprint(now.Year()), "--no-send")
+	wants(got, "Verdict: FOUND. PG&E statement of 04/15/"+fmt.Sprint(now.Year()), "Electric, PG&E charges: $24.23", "Gas 10/08 to 11/05 (29 days): $160.73 for 53 therms",
+		"Tier 1 Usage: 11.8 therms at $2.42/therm = $28.52", "NOT sent", "File: ")
+	if in, ok := session.Current(); ok && len(session.Tabs(in)) != 1 {
+		t.Errorf("the tab the PDF opened in must be closed again: %v", session.Tabs(in))
+	}
+	if _, err := exec.LookPath("gs"); err == nil {
+		pgeSent := filepath.Join(t.TempDir(), "pgesent")
+		if err := os.WriteFile(sendFile, []byte("#!/bin/sh\necho \"$1|$2\" >> "+pgeSent+"\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("NOVEE_BROWSE_NOTIFY_CMD", sendFile)
+		_, got = run("pge-report", fmt.Sprint(now.Year()))
+		wants(got, "STARTED a background job. It reads every PG&E statement", "novee-browse pge-report status")
+		for i := 0; i < 240; i++ {
+			if _, ok := currentJob(); !ok {
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		rep, _ := os.ReadFile(pgeSent)
+		for _, w := range []string{"PG&E Bills - " + fmt.Sprint(now.Year()), "3 statements", "November (statement 11/13)\n• Charges: $184.96\n• Electric, PG&E: $24.23\n• Gas: $160.73 (53 therms)",
+			"Total " + fmt.Sprint(now.Year()) + "\n• Charges: $554.88", "PG&E Gas - " + fmt.Sprint(now.Year()), "• Tier 1: $2.42 per therm", "PGE-bills-" + fmt.Sprint(now.Year()) + ".csv"} {
+			if !strings.Contains(string(rep), w) {
+				t.Errorf("the PG&E report lacks %q:\n%s", w, rep)
+			}
+		}
+		os.Unsetenv("NOVEE_BROWSE_NOTIFY_CMD")
+	}
+
 	// Uber Eats: the receipt is a framed document in a pop-up, and Uber Cash is the credit.
 	t.Setenv("NOVEE_UBEREATS_URL", srv.URL+"/ubereats")
 	_, got = run("ubereats-receipts")
@@ -462,6 +525,15 @@ func TestBrowseEndToEnd(t *testing.T) {
 			t.Errorf("Uber Cash is not priced:\n%s", spent)
 		}
 	}
+	os.Unsetenv("NOVEE_BROWSE_NOTIFY_CMD")
+
+	// Fields inside a web component are seen, typed into and recognised as a sign-in.
+	t.Setenv("NOVEE_BROWSE_NOTIFY_CMD", "/bin/true")
+	_, got = run("open", srv.URL+"/login/component")
+	wants(got, `input "Username"`, `input(password) "Password"`, "NOTE: this page asks you to sign in")
+	_, got = run("type", num(got, "Username"), "someone")
+	wants(got, `Typed "someone" into "Username"`, `input "Username" value="someone"`)
+	run("close")
 	os.Unsetenv("NOVEE_BROWSE_NOTIFY_CMD")
 
 	// A sign-in page that comes up empty for a used profile gets a fresh profile.

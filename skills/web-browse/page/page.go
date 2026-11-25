@@ -2,6 +2,7 @@ package page
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -165,7 +166,12 @@ func (p *Page) Element(ctx context.Context, ref int) (Element, error) {
 	return *e, nil
 }
 
-func sel(ref int) string { return fmt.Sprintf(`document.querySelector('[data-novee-ref="%d"]')`, ref) }
+// sel is the script expression for element ref, wherever it is: in the page
+// or inside the shadow tree of a web component.
+func sel(ref int) string {
+	return fmt.Sprintf(`(function f(r) { const hit = r.querySelector('[data-novee-ref="%d"]'); if (hit) return hit;
+  for (const e of r.querySelectorAll('*')) if (e.shadowRoot) { const h = f(e.shadowRoot); if (h) return h; } return null; })(document)`, ref)
+}
 
 // Click clicks element ref the way a person would, with the mouse.
 func (p *Page) Click(ctx context.Context, ref int) error {
@@ -177,7 +183,8 @@ func (p *Page) Click(ctx context.Context, ref int) error {
   el.scrollIntoView({block: 'center', inline: 'center'});
   el.removeAttribute('target'); // stay in this tab
   const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
-  const top = document.elementFromPoint(x, y);
+  let top = document.elementFromPoint(x, y);
+  while (top && top.shadowRoot && top.shadowRoot.elementFromPoint(x, y) && top.shadowRoot.elementFromPoint(x, y) !== top) top = top.shadowRoot.elementFromPoint(x, y);
   return {x: x, y: y, covered: !top || !(el.contains(top) || top.contains(el))};
 })()`, sel(ref)), &at)
 	if err != nil {
@@ -423,7 +430,7 @@ func (p *Page) Where(ctx context.Context) (title, url string, password bool, err
 		Title, URL string
 		Password   bool
 	}
-	err = p.eval(ctx, `({title: document.title, url: location.href, password: Array.from(document.querySelectorAll('input[type=password]')).some(e => e.offsetParent !== null)})`, &w)
+	err = p.eval(ctx, `({title: document.title, url: location.href, password: (function all(r) { let o = Array.from(r.querySelectorAll('input[type=password]')); for (const e of r.querySelectorAll('*')) if (e.shadowRoot) o = o.concat(all(e.shadowRoot)); return o; })(document).some(e => e.offsetParent !== null)})`, &w)
 	return w.Title, w.URL, w.Password, err
 }
 
@@ -482,4 +489,39 @@ func (p *Page) Download(ctx context.Context, ref int, dir string) (string, error
 		}
 	}
 	return "", errors.New("the site offered no file after the click")
+}
+
+// CaptureFile clicks element ref and returns the file the page builds in
+// answer, when the page does not download it but shows it: a "View PDF" link
+// that fetches the document, wraps it in an object address of its own and
+// opens that in a new tab. The file is taken at the moment the page makes
+// it. The caller closes the tab that opened.
+func (p *Page) CaptureFile(ctx context.Context, ref int) ([]byte, string, error) {
+	if err := p.eval(ctx, `(() => { window.__noveeFiles = [];
+  if (!window.__noveeHooked) { window.__noveeHooked = true; const make = URL.createObjectURL;
+    URL.createObjectURL = function (b) { try { if (b instanceof Blob) window.__noveeFiles.push(b); } catch (e) {} return make.call(URL, b); }; }
+})()`, nil); err != nil {
+		return nil, "", err
+	}
+	if err := p.Click(ctx, ref); err != nil {
+		return nil, "", err
+	}
+	var f struct {
+		N    int
+		Type string
+		Data string
+	}
+	for deadline := time.Now().Add(40 * time.Second); time.Now().Before(deadline) && ctx.Err() == nil; time.Sleep(700 * time.Millisecond) {
+		if err := p.eval(ctx, `(async () => { const fs = window.__noveeFiles || []; if (!fs.length) return {n: 0};
+  const b = fs[fs.length - 1], u = new Uint8Array(await b.arrayBuffer()); let s = '';
+  for (let i = 0; i < u.length; i += 0x8000) s += String.fromCharCode.apply(null, u.subarray(i, i + 0x8000));
+  return {n: u.length, type: b.type, data: btoa(s)}; })()`, &f); err != nil {
+			return nil, "", err
+		}
+		if f.N > 0 {
+			data, err := base64.StdEncoding.DecodeString(f.Data)
+			return data, f.Type, err
+		}
+	}
+	return nil, "", errors.New("the page made no file after the click")
 }

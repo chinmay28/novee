@@ -72,6 +72,12 @@ DoorDash order and receipt questions work the same way, with `doordash` in place
 
 Uber Eats works the same way again, with `ubereats`: `novee-browse ubereats-receipt last`, `ubereats-receipt 11/11/2026`, `ubereats-receipts 2026`, `ubereats-year-pdf all`, `ubereats-spending 2026`. Its stored money is called Uber Cash. When Chinmay asks about food delivery spending without naming the service, ask which one, or run both spending commands one after the other (only one background job runs at a time; wait for the first to finish).
 
+PG&E questions (the electric bill, the gas bill, generation and delivery charges, credits, the rate per kWh or per therm, solar, net energy metering, the true-up) always go through these commands, in the first turn:
+- One statement in full, with every line and rate: `novee-browse pge-bill last` or `novee-browse pge-bill 11/2026`. The PDF goes to Chinmay by itself.
+- Which statements exist and their amounts: `novee-browse pge-bills 2026`.
+- Anything over several months (how the year went, spending, usage, rates over time, solar sent to the grid, the NEM balance): `novee-browse pge-report 2026`. A background job; it sends Chinmay the analysis itself. Reply what the output tells you to reply and stop.
+- Copy figures exactly from the output. Never work out sums, averages or rates yourself.
+
 Torrent questions ("my tracker", "is X available yet", "is X out", "find a torrent of X", "get me the torrent for X", "tell me when X is up") always go through the torrent-browse skill, in the first turn. Your first tool call is `exec` with exactly one of these:
 - `novee-torrent check WORDS`: is it available yet.
 - `novee-torrent search WORDS`: the results, best first, with size, seeders and leechers. Add `--quality 1080p` or `--min-seeds 5` when Chinmay says so.
