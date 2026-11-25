@@ -473,11 +473,9 @@ def spawn_watcher(name):
     code = f"""
 import json, re, subprocess, time, sys
 from pathlib import Path
-name = {name!r}; vbox = {VBOX!r}; meta = Path({str(meta_path(name))!r}); uuid = {vminfo(name).get("UUID")!r}
+name = {name!r}; vbox = {VBOX!r}; meta = Path({str(meta_path(name))!r})
 def state():
     o = subprocess.run([vbox, "showvminfo", name, "--machinereadable"], capture_output=True, text=True).stdout
-    if uuid and f'UUID="{{uuid}}"' not in o:
-        sys.exit(0)            # the VM was deleted (or replaced by another VM with the same name): stop quietly
     m = re.search(r'^VMState="(\\w+)"', o, re.M); return m.group(1) if m else "unknown"
 def setphase(p, extra=None):
     try: d = json.loads(meta.read_text())
@@ -507,9 +505,8 @@ for _ in range(60):
 setphase("running", {{"ip": None}})
 """
     log = VM_ROOT / name / "install-watcher.log"
-    p = subprocess.Popen([sys.executable, "-c", code], stdout=open(log, "a"), stderr=subprocess.STDOUT,
-                         stdin=subprocess.DEVNULL, start_new_session=True)
-    m = load_meta(name); m["watcher_pid"] = p.pid; save_meta(name, m)
+    subprocess.Popen([sys.executable, "-c", code], stdout=open(log, "a"), stderr=subprocess.STDOUT,
+                     stdin=subprocess.DEVNULL, start_new_session=True)
     return str(log)
 
 
@@ -620,9 +617,6 @@ def cmd_install_status(a):
     phase = m.get("phase")
     if phase in ("installing",) and d.get("VMState") == "poweroff":
         phase = "installed, finalizing"
-    if phase == "installing" and m.get("watcher_pid"):
-        try: os.kill(int(m["watcher_pid"]), 0)
-        except OSError: phase = "installing (watcher gone; run `log` or `screenshot` to check)"
     ip = m.get("ip") or find_ip(name, d)
     return {"name": name, "phase": phase, "vm_state": d.get("VMState"), "ip": ip, "since": m.get("phase_at") or m.get("created"),
             "user": m.get("user"), "done": phase == "running" and bool(ip)}
@@ -664,10 +658,6 @@ def cmd_delete(a):
     if vminfo(name).get("VMState") != "poweroff":
         raise Fail(f"'{name}' is {vminfo(name).get('VMState')}; power it off first (`poweroff {name} --yes`)")
     folder = Path(vminfo(name).get("CfgFile", "")).parent
-    pid = load_meta(name).get("watcher_pid")
-    if pid:
-        try: os.kill(int(pid), 15)
-        except (OSError, ValueError): pass
     vbm("unregistervm", name, "--delete-all", timeout=300)
     if folder.exists() and folder.parent == VM_ROOT:
         shutil.rmtree(folder, ignore_errors=True)
