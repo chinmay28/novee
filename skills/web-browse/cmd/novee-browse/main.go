@@ -88,6 +88,10 @@ Owner only (opens a browser window):
 Clicks and Enter presses that could buy, send, delete or change an account
 stop with APPROVAL NEEDED and run only with --yes, which asks the owner.
 Password and card fields are never typed into.
+
+Sites that hold Chinmay's money or records (Costco, DoorDash, Uber Eats, PG&E,
+and every site he signed in to) are READ-ONLY: there such clicks are REFUSED
+outright, --yes or not; only search boxes are typed into.
 `
 
 const (
@@ -219,7 +223,22 @@ func (a *app) withPage(f func(*page.Page) (int, error)) (int, error) {
 	if err != nil {
 		return exitError, err
 	}
+	if session.ReadOnly(in.Profile) {
+		p.Check = guard.ReadOnly // whichever command is at work, it can only look
+	}
 	return f(p)
+}
+
+// readOnly says whether the open site is one where nothing may be changed.
+func readOnly() bool {
+	in, ok := session.Current()
+	return ok && session.ReadOnly(in.Profile)
+}
+
+// refused prints why an action is not taken on a read-only site.
+func (a *app) refused(err error) int {
+	fmt.Fprintf(a.out, "REFUSED: %s.\nNothing was done. Do not try another way and do not add --yes. If Chinmay wants this done he does it himself: `novee-browse live` sends him a link to this browser.\n", err)
+	return exitError
 }
 
 const maxShown = 80
@@ -233,6 +252,10 @@ func (a *app) show(ctx context.Context, p *page.Page) (int, error) {
 	fmt.Fprintf(a.out, "Page: %s\nURL: %s\n", s.Title, s.URL)
 	if s.ViewH > 0 && s.Height > s.ViewH+50 {
 		fmt.Fprintf(a.out, "Position: screen %d of about %d (`scroll down` for more)\n", s.ScrollY/s.ViewH+1, (s.Height+s.ViewH-1)/s.ViewH)
+	}
+	ro := readOnly()
+	if ro {
+		fmt.Fprintln(a.out, "READ-ONLY SITE: you may look, read, search and save pages here. Nothing may be changed, ordered, paid, sent or set, with or without approval.")
 	}
 	if s.Dialog {
 		fmt.Fprintln(a.out, "A pop-up is open on top of the page. The text and the list below are the pop-up's. `pdf` saves the pop-up alone. To go back to the page, click its Close button.")
@@ -256,7 +279,11 @@ func (a *app) show(ctx context.Context, p *page.Page) (int, error) {
 			continue
 		}
 		line := e.String()
-		if d, _ := guard.Click(e); d == guard.NeedsApproval {
+		if ro {
+			if guard.ReadOnly("click", e, false) != nil {
+				line += "  <- not allowed here (read-only)"
+			}
+		} else if d, _ := guard.Click(e); d == guard.NeedsApproval {
 			line += "  <- needs Chinmay's approval"
 		}
 		fmt.Fprintln(a.out, line)
@@ -299,6 +326,9 @@ func (a *app) open(ctx context.Context, args []string) (int, error) {
 		return exitError, err
 	}
 	d, why := guard.Open(url)
+	if d == guard.NeedsApproval && session.ReadOnly(session.SiteProfile(url)) {
+		return a.refused(fmt.Errorf("%s. This site is read-only for Novee", why)), nil
+	}
 	if code := a.allowed(d, why, *yes, "novee-browse open "+url); code != exitOK {
 		return code, nil
 	}
@@ -530,7 +560,15 @@ func (a *app) click(ctx context.Context, args []string) (int, error) {
 		if err != nil {
 			return exitError, err
 		}
+		if p.Check != nil {
+			if err := p.Check("click", e, false); err != nil {
+				return a.refused(err), nil
+			}
+		}
 		d, why := guard.Click(e)
+		if p.Check != nil { // on a read-only site what is allowed needs no approval, and nothing else is allowed
+			d = guard.Allow
+		}
 		if code := a.allowed(d, why, *yes, fmt.Sprintf("novee-browse click %d", n)); code != exitOK {
 			return code, nil
 		}
@@ -559,6 +597,11 @@ func (a *app) typeText(ctx context.Context, args []string) (int, error) {
 		e, err := p.Element(ctx, n)
 		if err != nil {
 			return exitError, err
+		}
+		if p.Check != nil && !e.Password && !e.Payment {
+			if err := p.Check("type", e, *enter); err != nil {
+				return a.refused(err), nil
+			}
 		}
 		d, why := guard.Type(e, *enter)
 		retry := fmt.Sprintf("novee-browse type %d %s --enter", n, text)
@@ -590,6 +633,11 @@ func (a *app) selectOption(ctx context.Context, args []string) (int, error) {
 		e, err := p.Element(ctx, n)
 		if err != nil {
 			return exitError, err
+		}
+		if p.Check != nil {
+			if err := p.Check("select", e, false); err != nil {
+				return a.refused(err), nil
+			}
 		}
 		if err := p.Select(ctx, n, want); err != nil {
 			return exitError, err
@@ -642,7 +690,11 @@ func (a *app) download(ctx context.Context, args []string) (int, error) {
 		if err != nil {
 			return exitError, err
 		}
-		if d, why := guard.Click(e); d != guard.Allow {
+		if p.Check != nil {
+			if err := p.Check("click", e, false); err != nil {
+				return a.refused(err), nil
+			}
+		} else if d, why := guard.Click(e); d != guard.Allow {
 			return a.allowed(d, why, false, ""), nil
 		}
 		path, err := p.Download(ctx, n, filepath.Join(outDir(), "downloads"))
@@ -748,6 +800,10 @@ func viewerMain(site string) int {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return exitError
+	}
+	// A site Chinmay signed in to is an account of his: from now on it is read-only for Novee.
+	if in, ok := session.Current(); ok && how == "done" && !strings.HasPrefix(site, "live:") {
+		session.MarkSignedIn(in.Profile)
 	}
 	fmt.Fprintln(os.Stderr, "sign-in viewer ended:", how)
 	return exitOK

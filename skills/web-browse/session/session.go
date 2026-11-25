@@ -135,6 +135,48 @@ func SiteProfile(raw string) string {
 	return name
 }
 
+// personal are the sites that hold the owner's money and records whether or
+// not he has signed in yet.
+var personal = map[string]bool{"costco": true, "doordash": true, "ubereats": true, "uber": true, "pge": true}
+
+func signedInMark(profile string) string {
+	return filepath.Join(ProfileDir(profile), "novee-signed-in")
+}
+
+// MarkSignedIn records that the owner signed in to this profile's site himself.
+func MarkSignedIn(profile string) {
+	if os.MkdirAll(ProfileDir(profile), 0o700) == nil {
+		_ = os.WriteFile(signedInMark(profile), []byte(time.Now().Format(time.RFC3339)+"\n"), 0o600)
+	}
+}
+
+// ReadOnly says whether nothing may be changed on the site of this profile.
+// That holds for the sites named above, for every site the owner has signed
+// in to (an account is personal), and for those in $NOVEE_BROWSE_READONLY_SITES.
+// The owner can exempt a site by naming its profile on a line of
+// ~/.config/novee/browse-writable.
+func ReadOnly(profile string) bool {
+	if home, err := os.UserHomeDir(); err == nil {
+		if data, err := os.ReadFile(filepath.Join(home, ".config", "novee", "browse-writable")); err == nil {
+			for _, line := range strings.Fields(string(data)) {
+				if line == profile {
+					return false
+				}
+			}
+		}
+	}
+	if personal[profile] {
+		return true
+	}
+	for _, name := range strings.FieldsFunc(os.Getenv("NOVEE_BROWSE_READONLY_SITES"), func(r rune) bool { return r == ',' || r == ' ' }) {
+		if name == profile {
+			return true
+		}
+	}
+	_, err := os.Stat(signedInMark(profile))
+	return err == nil
+}
+
 func file() string { return filepath.Join(Dir(), "session.json") }
 
 // Current returns the live browser, if there is one that answers.

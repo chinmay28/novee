@@ -98,3 +98,7 @@ A short log of how Novee was built. Dates are 2026.
 - Novee learned to read PG&E energy statements: the electric and gas charges, a community provider's generation charges, the rates per kWh and per therm, what a home with solar took from and sent to the grid, and the net energy metering balance up to the true-up.
 - The account site is built from web components, whose fields live in shadow trees that the page reader did not look into; it does now, which is also what let the sign-in page be recognised. A bill is not downloaded there but built in the page and shown in a new tab, so the file is taken at the moment the page makes it.
 - The statement's text is read by a small package with one test statement that is entirely made up. A year of statements becomes three chat messages: the bills, electricity and solar, gas.
+
+## November 24, later: read-only
+
+- With a utility account, two food delivery accounts and a shop account signed in, the owner asked for a hard rule: on anything personal or financial, Novee reads and nothing else. The approval step that used to stand before a risky click is gone there; such a click is refused. The check sits under every command, so the tools that fetch receipts and bills cannot do more than the model can.

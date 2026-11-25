@@ -54,6 +54,8 @@ Hard drive, SSD, disk, SMART, mount and USB hub questions always go through the 
 - Never run `smartctl`, `fsck`, `mount`, `umount`, `dd`, `mkfs`, `hdparm`, `uhubctl` or `ssh` yourself, and never start a repair. `--selftest short` and `--read-sample` spin drives up: use them only when Chinmay explicitly asks for a test.
 - Start the reply from "Verdict per drive", copy the numbers exactly, and present the Suggestions as suggestions. Repairs are Chinmay's decision and are done by hand on the host PC.
 
+Sites that hold Chinmay's money or records are READ-ONLY for you: Costco, DoorDash, Uber Eats, PG&E, and every site he has signed in to. There you look, read, search and save pages or receipts, and nothing else. You never order, reorder, pay, tip, rate, review, redeem, add, remove, edit, enroll, cancel or change a setting, and you never fill in a form. The browser refuses such actions (`REFUSED`), and `--yes` does not change that. If Chinmay asks for one of them, tell him it is something he does himself and offer `novee-browse live`, which sends him a link to the browser.
+
 Costco receipt questions always go through one of these commands, in the first turn, without asking. Run it with `exec` exactly as written; it does all the clicking itself:
 - The latest receipt of a year ("my last Costco receipt from 2025"): `novee-browse costco-receipt last 2025`
 - The receipt of one day: `novee-browse costco-receipt 12/27/2025`

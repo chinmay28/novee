@@ -22,7 +22,25 @@ import (
 )
 
 // Page is an attached browser tab.
-type Page struct{ ctx context.Context }
+type Page struct {
+	ctx context.Context
+	// Check, if set, is asked before every click, typing and choice; an error
+	// stops the action. It is how a read-only site stays read-only whichever
+	// command is at work.
+	Check func(action string, e Element, enter bool) error
+}
+
+// allowed asks Check about an action on element ref.
+func (p *Page) allowed(ctx context.Context, action string, ref int, enter bool) error {
+	if p.Check == nil {
+		return nil
+	}
+	e, err := p.Element(ctx, ref)
+	if err != nil {
+		return err
+	}
+	return p.Check(action, e, enter)
+}
 
 // ErrPrints means a download button only prints the page; PDF does the same.
 var ErrPrints = errors.New("this button prints the page instead of handing over a file")
@@ -175,6 +193,9 @@ func sel(ref int) string {
 
 // Click clicks element ref the way a person would, with the mouse.
 func (p *Page) Click(ctx context.Context, ref int) error {
+	if err := p.allowed(ctx, "click", ref, false); err != nil {
+		return err
+	}
 	var at struct {
 		X, Y    float64
 		Covered bool
@@ -207,6 +228,9 @@ func (p *Page) Click(ctx context.Context, ref int) error {
 
 // Type replaces the content of text field ref with text, then presses Enter if enter is set.
 func (p *Page) Type(ctx context.Context, ref int, text string, enter bool) error {
+	if err := p.allowed(ctx, "type", ref, enter); err != nil {
+		return err
+	}
 	var ok bool
 	err := p.eval(ctx, fmt.Sprintf(`(() => { const el = %s; if (!el) return false;
   el.scrollIntoView({block: 'center'}); el.focus();
@@ -237,6 +261,9 @@ func (p *Page) Type(ctx context.Context, ref int, text string, enter bool) error
 
 // Select chooses the option of drop-down ref whose text contains want.
 func (p *Page) Select(ctx context.Context, ref int, want string) error {
+	if err := p.allowed(ctx, "select", ref, false); err != nil {
+		return err
+	}
 	var res string
 	err := p.eval(ctx, fmt.Sprintf(`(() => { const el = %s; if (!el) return 'gone';
   if (el.tagName !== 'SELECT') return 'notselect';

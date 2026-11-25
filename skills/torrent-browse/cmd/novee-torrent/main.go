@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/chinmay28/novee/skills/web-browse/guard"
 	"github.com/chinmay28/novee/skills/web-browse/page"
 	"github.com/chinmay28/novee/skills/web-browse/session"
 )
@@ -394,6 +395,9 @@ func (t *tool) visit(ctx context.Context, addr string) (*page.Page, error) {
 	p, err := page.Attach(in.Port, id)
 	if err != nil {
 		return nil, err
+	}
+	if session.ReadOnly(in.Profile) { // an account site: this tool searches and reads there, nothing more
+		p.Check = guard.ReadOnly
 	}
 	if s, err := p.Snapshot(ctx); err == nil && challenge.MatchString(s.Title+" "+firstN(s.Text, 300)) {
 		// A "prove you are human" page: only Chinmay can pass it, through the same link as a sign-in.

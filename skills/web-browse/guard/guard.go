@@ -73,6 +73,59 @@ func Open(raw string) (Decision, string) {
 	return Allow, ""
 }
 
+// On a read-only site nothing may be changed at all, with or without the
+// owner's approval: these are the sites that hold his money and his personal
+// records (a utility, a shop account, a food delivery account). Looking,
+// reading, searching and saving a page are what is left, and that is the point.
+
+// mutating matches the name of anything that does more than show something.
+var mutating = regexp.MustCompile(`(?i)\b(` +
+	`buy|purchase|order (now|again)|place (your |my |the )?order|reorder|check ?out|pay|payment method|autopay|auto-pay|tip|` +
+	`add|remove|delete|edit|update|change|save|rename|move|apply|redeem|claim|renew|upgrade|downgrade|` +
+	`subscribe|unsubscribe|enroll|unenroll|sign ?up|register|join|opt in|set ?up|turn (on|off)|enable|disable|activate|deactivate|` +
+	`submit|send|resend|post|publish|share|invite|upload|import|reply|comment|rate|review|like|follow|favorite|` +
+	`cancel (my |the |this |your )?(order|subscription|membership|plan|item|booking|reservation|service|autopay)|` +
+	`(start|stop|transfer|close) (my |your |the )?(service|account|membership)|close account|` +
+	`return (items?|or replace|an item)|start a return|replace items?|refund|dispute|report (a|an) \w+|` +
+	`transfer|donate|book (a|an|now|it)|reserve|schedule|reschedule|link|unlink|connect|disconnect|verify|confirm|accept|agree|` +
+	`log ?out|sign ?out|reset|do not show|don.?t show|remember)\b`)
+
+// harmless are the buttons of notices that have to go before a page can be read; the choice is always the refusing one.
+var harmless = regexp.MustCompile(`(?i)^(reject all|reject|opt out|decline( all)?|only necessary|necessary only|no,? thanks|not now|maybe later|got it|dismiss|close|cancel|back|skip)$`)
+
+// filters are the drop-down lists that only choose what is shown.
+var filters = regexp.MustCompile(`(?i)(showing|show|sort|filter|period|year|month|date|range|view|page|category|status|activity|jump)`)
+
+// ReadOnly judges an action ("click", "type", "select") on a read-only site.
+// It returns nil when the action only looks, and the reason when it does not.
+func ReadOnly(action string, e page.Element, enter bool) error {
+	no := func(why string) error {
+		return fmt.Errorf("%s. This site is read-only for Novee: nothing on it may be changed, with or without approval", why)
+	}
+	switch action {
+	case "click":
+		switch {
+		case harmless.MatchString(strings.TrimSpace(e.Name)):
+			return nil
+		case e.Submit && e.Search:
+			return nil
+		case mutating.MatchString(e.Name):
+			return no(fmt.Sprintf("%s %q does more than show something", e.Kind, e.Name))
+		case e.Submit:
+			return no(fmt.Sprintf("%s %q sends a form", e.Kind, e.Name))
+		}
+	case "type":
+		if !e.Search {
+			return no(fmt.Sprintf("%q is not a search box, and only search boxes are typed into", e.Name))
+		}
+	case "select":
+		if !e.Search && !filters.MatchString(e.Name) {
+			return no(fmt.Sprintf("the list %q may be a setting, not a filter", e.Name))
+		}
+	}
+	return nil
+}
+
 // noAgents matches sites that turn AI agents away in so many words. Amazon
 // answered a sign-in with "Continued access by an unauthorized AI agent
 // violates Amazon's Conditions of Use"; that is a decision to respect, not

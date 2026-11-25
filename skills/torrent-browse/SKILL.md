@@ -62,6 +62,8 @@ Options for search, check, grab and watch: `--quality 1080p`, `--min-seeds 5`, `
 - `ERROR`: quote it. Do not retry unchanged and do not open the site with other tools.
 - Zero seeders means it cannot be downloaded now. Say so instead of sending it, unless he asks anyway.
 
+The site is an account of Chinmay's, so it is read-only like the others: this tool searches it, reads it and fetches `.torrent` files, and changes nothing there.
+
 ## Setup (see docs/SETUP.md)
 
 A Go program in this folder, built on the web-browse skill's packages and installed as `~/.local/bin/novee-torrent`. It uses the web-browse browser and its sign-in link. The site's address is in `~/.config/novee/torrent.json`, the last search and the watch list in `~/.local/share/novee/torrent/`; none of that is in the git repository.

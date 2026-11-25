@@ -109,3 +109,32 @@ func TestNoAgentsSites(t *testing.T) {
 		t.Errorf("a name that merely starts like it is fine: %v", err)
 	}
 }
+
+func TestReadOnly(t *testing.T) {
+	el := func(kind, name string) page.Element { return page.Element{Kind: kind, Name: name} }
+	for _, name := range []string{"Pay Now", "Pay Bill", "Reorder", "Add to cart", "Add an Account", "Rate your order", "Leave a review", "Buy Items Again",
+		"Return or Replace Items", "Update My Information", "Set up autopay", "Enroll", "Change my mailing address", "Sign Out", "Do not show this message again",
+		"Redeem", "Save", "Edit profile", "Cancel order", "Resend", "Download Bill and Payment History. Submit", "Accept All", "Start service", "Tip"} {
+		if ReadOnly("click", el("button", name), false) == nil {
+			t.Errorf("%q must be refused on a read-only site", name)
+		}
+	}
+	for _, name := range []string{"View Receipt", "View Return Receipt", "View Bill PDF", "Warehouse", "Online", "Go to next page", "Next", "Load More", "Show more",
+		"Orders & Purchases", "Usage and Rates", "Billing", "Close", "Reject All", "Opt out", "Download receipt", "View Order Details", "2", "Address Book", "Returns"} {
+		if err := ReadOnly("click", el("button", name), false); err != nil {
+			t.Errorf("%q only shows something and must be allowed: %v", name, err)
+		}
+	}
+	if ReadOnly("click", page.Element{Kind: "button", Name: "Go", Submit: true}, false) == nil {
+		t.Error("a form may not be sent")
+	}
+	if err := ReadOnly("click", page.Element{Kind: "button", Name: "Search", Submit: true, Search: true}, false); err != nil {
+		t.Errorf("a search may be sent: %v", err)
+	}
+	if ReadOnly("type", el("input", "Gift note"), false) == nil || ReadOnly("type", page.Element{Kind: "input", Name: "Search", Search: true}, true) != nil {
+		t.Error("only search boxes are typed into")
+	}
+	if ReadOnly("select", el("select", "Payment frequency"), false) == nil || ReadOnly("select", el("select", "Showing"), false) != nil {
+		t.Error("a list that filters is allowed, one that may be a setting is not")
+	}
+}

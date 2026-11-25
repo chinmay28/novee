@@ -314,7 +314,32 @@ func TestBrowseEndToEnd(t *testing.T) {
 		t.Fatalf("stale number: %d %s", code, got)
 	}
 
+	// A read-only site: what only shows something works, everything else is refused, approval or not.
+	t.Setenv("NOVEE_BROWSE_READONLY_SITES", "main")
+	_, home = run("open", srv.URL)
+	wants(home, "READ-ONLY SITE", `button "Place order"  <- not allowed here (read-only)`)
+	before := ordered.Load()
+	if code, got = run("click", num(home, "Place order"), "--yes"); code == exitOK || ordered.Load() != before || !strings.Contains(got, "REFUSED") {
+		t.Fatalf("an order on a read-only site, even with --yes: code %d, ordered %d: %s", code, ordered.Load(), got)
+	}
+	wants(got, "read-only", "Do not try another way")
+	if code, got = run("type", num(home, "Gift note"), "hello"); code == exitOK || !strings.Contains(got, "REFUSED") {
+		t.Errorf("typing outside a search box on a read-only site: %d %s", code, got)
+	}
+	if code, got = run("click", num(home, "Continue")); code == exitOK || noted.Load() != 0 {
+		t.Errorf("sending a form on a read-only site: %d %s", code, got)
+	}
+	if code, got = run("select", num(home, "Period"), "last"); code != exitOK || !strings.Contains(got, "Showing 2025") {
+		t.Errorf("a list that only filters must still work: %d %s", code, got)
+	}
+	_, got = run("type", num(home, "Search the shop"), "strips", "--enter")
+	wants(got, "Results for strips")
+	run("back")
+	_, got = run("click", num(home, "Orders & Purchases"))
+	wants(got, "Page: Orders")
+
 	// The Costco receipt commands do the clicking themselves: tab, period, page, pop-up, PDF.
+	// They and the commands after them run under the read-only rule, as on the real sites.
 	t.Setenv("NOVEE_COSTCO_URL", srv.URL+"/costco#/app/x/ordersandpurchases")
 	gotFile := filepath.Join(t.TempDir(), "got")
 	sendFile := filepath.Join(t.TempDir(), "send")
@@ -526,6 +551,8 @@ func TestBrowseEndToEnd(t *testing.T) {
 		}
 	}
 	os.Unsetenv("NOVEE_BROWSE_NOTIFY_CMD")
+
+	os.Unsetenv("NOVEE_BROWSE_READONLY_SITES")
 
 	// Fields inside a web component are seen, typed into and recognised as a sign-in.
 	t.Setenv("NOVEE_BROWSE_NOTIFY_CMD", "/bin/true")

@@ -151,6 +151,7 @@ func TestTorrentTool(t *testing.T) {
 	t.Setenv("NOVEE_BROWSER_DIR", t.TempDir())
 	t.Setenv("NOVEE_BROWSE_HEADLESS", "1")
 	t.Setenv("NOVEE_BROWSE_NO_SYSTEMD", "1")
+	t.Setenv("NOVEE_BROWSE_READONLY_SITES", "main") // the site is an account: everything here must work read-only
 	sent := filepath.Join(dir, "sent")
 	notify := filepath.Join(dir, "notify")
 	if err := os.WriteFile(notify, []byte("#!/bin/sh\necho \"$1|$2\" >> "+sent+"\n"), 0o700); err != nil {
