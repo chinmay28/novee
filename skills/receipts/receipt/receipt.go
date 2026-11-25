@@ -43,7 +43,7 @@ type Receipt struct {
 	// When is the wall-clock time printed on the receipt. It is kept in UTC
 	// with no conversion, because shops print local time without a zone.
 	When     time.Time `json:"when"`
-	Location string    `json:"location,omitempty"` // shop name, e.g. "ALMADEN #470"
+	Location string    `json:"location,omitempty"` // shop name, e.g. "TESTVILLE #999"
 	Address  string    `json:"address,omitempty"`
 	Lines    []Line    `json:"lines"`
 	Subtotal Cents     `json:"subtotal"`

@@ -40,7 +40,7 @@ var (
 )
 
 // ueParse reads the past orders as they are on screen, newest first: per
-// order the store, "2 items for $36.76", "Oct 30 at 12:31 PM", "View receipt".
+// order the store, "2 items for $30.00", "Oct 03 at 12:00 PM", "View receipt".
 func ueParse(s page.Snapshot, now time.Time) ([]ddOrder, error) {
 	var links []string
 	shopURLs := map[string]string{}

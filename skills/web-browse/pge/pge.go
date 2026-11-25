@@ -97,11 +97,11 @@ var (
 	period     = regexp.MustCompile(`(\d\d/\d\d/\d{4}) to (\d\d/\d\d/\d{4}) \((\d+) billing days\)`)
 	schedule   = regexp.MustCompile(`(?m)Rate Schedule:[ \t]+(\S.*?)(?:\s{3,}|$)`)
 	usage      = regexp.MustCompile(`(Imports|Exports|Net Usage|Total Usage(?: \(Est\.\))?)\s+(-?[\d,]+\.\d+)\s*(kWh|Therms)`)
-	// "Peak   166.581300   kWh @ $0.39757   $66.23", "Tier 1 Usage  11.760000 Therms@ $2.42480  $28.52"
+	// "Peak   150.000000   kWh @ $0.40000   $60.00", "Tier 1 Usage  12.000000 Therms@ $2.00000  $24.00"
 	priced = regexp.MustCompile(`^\s*(\S.*?)\s{2,}(-?[\d,]+\.\d+)\s*(kWh|Therms)\s*@\s*(-?\$[\d.]+)\s+` + money)
-	// "Base Services Charge   29 days @ $0.79343   $23.01"
+	// "Base Services Charge   30 days @ $0.64000   $19.20"
 	daily = regexp.MustCompile(`^\s*(\S.*?)\s{2,}(\d+) days @ \$([\d.]+)\s+` + money)
-	// "Generation Credit   -20.27"
+	// "Generation Credit   -20.00"
 	plain     = regexp.MustCompile(`^\s*(\S.*?)\s{2,}` + money + `(?:\s{2,}.*)?$`)
 	charge    = regexp.MustCompile(`(?i)(charge|credit|tax|surcharge|adjustment|discount|fee)`)
 	netGen    = regexp.MustCompile(`Net Charges\s+` + money)

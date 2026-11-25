@@ -261,7 +261,7 @@ func parsePrice(s string) (lo, hi *receipt.Cents, err error) {
 		}
 		f, err := strconv.ParseFloat(p, 64)
 		if err != nil {
-			return nil, fmt.Errorf("bad price %q, want LO-HI like 10-15 or one amount like 13.61", s)
+			return nil, fmt.Errorf("bad price %q, want LO-HI like 10-15 or one amount like 12.34", s)
 		}
 		c := receipt.FromFloat(f)
 		return &c, nil

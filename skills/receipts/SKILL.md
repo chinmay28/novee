@@ -1,6 +1,6 @@
 ---
 name: receipts
-description: Chinmay's shop receipts (Costco now, other shops later) kept in a private archive on this VM. Use for "did I ever buy X", "when did I buy X", "how much did I pay for X", "have I bought item 1370476", "what did I spend at Costco", "how far back do my receipts go", "send me my Costco receipts as a PDF", "download / update my receipts".
+description: Chinmay's shop receipts (Costco now, other shops later) kept in a private archive on this VM. Use for "did I ever buy X", "when did I buy X", "how much did I pay for X", "have I bought item 1234567", "what did I spend at Costco", "how far back do my receipts go", "send me my Costco receipts as a PDF", "download / update my receipts".
 metadata:
   {
     "openclaw":
@@ -31,7 +31,7 @@ novee-receipts <command>
 ## How to search
 
 - Put the product words in plainly: `search 3m command hanging strips`. The script already handles abbreviated receipt names (CMND = command, STRP = strips), partial matches and typos. Do not run many searches with fragments of the same words.
-- If Chinmay gives a price or a range, add `--price 13.61` or `--price 10-15`. If he gives an item number, use `--item 1370476`.
+- If Chinmay gives a price or a range, add `--price 12.34` or `--price 10-15`. If he gives an item number, use `--item 1234567`.
 - If he gives a product link, the item number is usually not in the link. Search by the product's name.
 
 ## How to answer

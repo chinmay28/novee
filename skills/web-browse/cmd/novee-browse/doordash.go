@@ -303,7 +303,7 @@ func (a *app) shopReceipts(ctx context.Context, sh *shop, args []string) (int, e
 // shopReceipt opens one order, prints its receipt, saves it as a PDF and
 // sends the PDF to the owner.
 func (a *app) shopReceipt(ctx context.Context, sh *shop, args []string) (int, error) {
-	usage := fmt.Sprintf("usage: %s-receipt last [YEAR]  or  %s-receipt MM/DD/YYYY [STORE NAME]. Examples: %s-receipt last, %s-receipt 11/15/2026 mehak", sh.key, sh.key, sh.key, sh.key)
+	usage := fmt.Sprintf("usage: %s-receipt last [YEAR]  or  %s-receipt MM/DD/YYYY [STORE NAME]. Examples: %s-receipt last, %s-receipt 03/14/2025 curry", sh.key, sh.key, sh.key, sh.key)
 	fs := flag.NewFlagSet(sh.key+"-receipt", flag.ContinueOnError)
 	noSend := fs.Bool("no-send", false, "")
 	pos, err := parse(fs, args)

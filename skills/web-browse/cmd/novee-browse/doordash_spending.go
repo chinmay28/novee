@@ -23,7 +23,7 @@ import (
 //
 // The order list is not enough for this: an order paid with DoorDash credits
 // shows a total of $0.00 there. The receipt has the line "DoorDash Credits
-// -$20.35", and what the order cost is what was charged plus those credits.
+// -$12.00", and what the order cost is what was charged plus those credits.
 // A model asked for the breakdown added up list totals in its head and got
 // the count and the sums wrong, so the reading and the arithmetic are done
 // here and the finished report goes to the owner.
@@ -70,7 +70,7 @@ func ddAmounts(text string) map[string]float64 {
 }
 
 var (
-	// "Refund amount: $23.56 Issued to: DoorDash Credits", and on a cancelled order "We've issued $44.13 credits".
+	// "Refund amount: $10.00 Issued to: DoorDash Credits", and on a cancelled order "We've issued $20.00 credits".
 	refundToCredits = regexp.MustCompile(`Refund amount:\s*\$([\d,]+\.\d{2})\s*Issued to:\s*DoorDash Credits`)
 	issuedCredits   = regexp.MustCompile(`issued \$([\d,]+\.\d{2}) credits`)
 	itemCount       = regexp.MustCompile(`^\d+ Items?$`)

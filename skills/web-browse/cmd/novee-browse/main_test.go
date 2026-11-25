@@ -59,11 +59,11 @@ const fakeCostco = `<html><head><title>Orders & Purchases | Costco</title></head
 </main><script>
 let tab = false, pg = 0;
 const data = {
-  'Last 3 Months': [['11/18/2026 - 12:02pm', 'ALMADEN', '$69.76']],
-  '2026 June - August': [['07/04/2026 - 10:00am', 'ALMADEN', '$10.00']],
-  '2026 December - February': [['02/14/2026 - 11:33am', 'ALMADEN', '$137.48'], ['01/02/2026 - 11:06am', 'ALMADEN', '$89.83'],
-    ['12/27/2025 - 03:16pm', 'ALMADEN', '$117.25'], ['12/21/2025 - 02:32pm', 'SAN JOSE', '$77.92']],
-  '2025 September - November': [['11/30/2025 - 09:00am', 'ALMADEN', '$20.00']],
+  'Last 3 Months': [['11/19/2026 - 12:00pm', 'NORTHTOWN', '$61.00']],
+  '2026 June - August': [['07/04/2026 - 10:00am', 'NORTHTOWN', '$10.00']],
+  '2026 December - February': [['02/15/2026 - 11:30am', 'NORTHTOWN', '$130.00'], ['01/03/2026 - 11:00am', 'NORTHTOWN', '$80.00'],
+    ['12/28/2025 - 03:00pm', 'NORTHTOWN', '$110.00'], ['12/20/2025 - 02:30pm', 'EASTSIDE', '$70.00']],
+  '2025 September - November': [['11/30/2025 - 09:00am', 'NORTHTOWN', '$20.00']],
   '2025 June - August': [],
 };
 function draw() {
@@ -84,7 +84,7 @@ const online = {'2025 September - November': [['777001', '10/10/2025', '$59.98']
 addEventListener('hashchange', draw);
 function show(i) {
   const r = data[document.getElementById('period').value][i];
-  document.getElementById('body').innerText = r[1] + ' #470 CHERRIES 9.99 TOTAL ' + r[2] + ' ' + r[0];
+  document.getElementById('body').innerText = r[1] + ' #999 APPLES 5.00 TOTAL ' + r[2] + ' ' + r[0];
   document.getElementById('r').hidden = false;
 }
 </script></body></html>`
@@ -94,10 +94,10 @@ func site(ordered, noted *atomic.Int32) http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, shopPage) })
 	mux.HandleFunc("/orders", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `<title>Orders</title><main><h1>Your orders</h1><p>03/14/2025 CMND PICT STRP $15.99</p>
-<div class="card"><b>12/27/2025</b> Total $117.25 <button onclick="document.getElementById('r').hidden = false">View Receipt</button></div>
-<div class="card"><b>12/21/2025</b> Total $77.92 <button>View Receipt</button></div>
+<div class="card"><b>12/28/2025</b> Total $110.00 <button onclick="document.getElementById('r').hidden = false">View Receipt</button></div>
+<div class="card"><b>12/20/2025</b> Total $70.00 <button>View Receipt</button></div>
 <div id="r" role="dialog" aria-modal="true" hidden style="position:fixed;top:10px;left:10px;width:300px;height:200px;background:#fff">
-<h2>Receipt</h2><p>CHERRIES 9.99</p><p>TOTAL 117.25</p><button onclick="this.parentElement.hidden = true">Close</button></div></main>`)
+<h2>Receipt</h2><p>APPLES 5.00</p><p>TOTAL 110.00</p><button onclick="this.parentElement.hidden = true">Close</button></div></main>`)
 	})
 	mux.HandleFunc("/search", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `<title>Search</title><main>Results for %s</main>`, r.URL.Query().Get("q"))
@@ -117,20 +117,20 @@ if (location.hash !== '#again') localStorage.setItem('seen', '1');</script>`)
 	ddNow, ddOld := time.Now(), time.Now().AddDate(-1, 1, 0)
 	mux.HandleFunc("/doordash", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, `<title>Order History</title><main><h1>Orders</h1>
-<div><span>Today, %s</span><div><a href="/store/1">Mehak of India</a><div>$16.20 • 1 item • Personal</div><div>Dal Tadka</div><a href="/doordash/order/a1">View Receipt</a></div>
-<div><a href="/store/2">Chaat Cafe</a><div>$27.60 • 2 items • Personal</div><div>Saag</div><a href="/doordash/order/a2">View Receipt</a></div></div>
-<div><span>%s</span><div><a href="/store/3">Dunkin'</a><div>$18.90 • 2 items • Personal</div><div>Egg</div><a href="/doordash/order/b1">View Receipt</a></div></div>
+<div><span>Today, %s</span><div><a href="/store/1">Example Curry House</a><div>$12.00 • 1 item • Personal</div><div>Curry</div><a href="/doordash/order/a1">View Receipt</a></div>
+<div><a href="/store/2">Sample Noodle Bar</a><div>$23.00 • 2 items • Personal</div><div>Noodles</div><a href="/doordash/order/a2">View Receipt</a></div></div>
+<div><span>%s</span><div><a href="/store/3">Test Bakery</a><div>$9.50 • 2 items • Personal</div><div>Bread</div><a href="/doordash/order/b1">View Receipt</a></div></div>
 </main>`, ddNow.Format("Jan 2"), ddOld.Format("Jan 2"))
 	})
 	mux.HandleFunc("/doordash/order/", func(w http.ResponseWriter, r *http.Request) {
-		when, store, total := ddNow, "Mehak of India", "$16.20"
+		when, store, total := ddNow, "Example Curry House", "$12.00"
 		switch r.URL.Path[len("/doordash/order/"):] {
 		case "a2":
-			store, total = "Chaat Cafe", "$27.60"
+			store, total = "Sample Noodle Bar", "$23.00"
 		case "b1":
-			when, store, total = ddOld, "Dunkin'", "$18.90"
+			when, store, total = ddOld, "Test Bakery", "$9.50"
 		}
-		fmt.Fprintf(w, `<title>Order</title><main><h1>Order Complete</h1><p>%s at 8:19 PM</p><p>%s</p><div>Subtotal</div><div>$30.00</div><div>Delivery Fee</div><div>$2.99</div><div>$0.00</div><div>DoorDash Credits</div><div>-$5.00</div><div>Total</div><div>%s</div><div>Payment</div><div>$99.99</div><button onclick="print()">Download receipt</button></main>`,
+		fmt.Fprintf(w, `<title>Order</title><main><h1>Order Complete</h1><p>%s at 8:00 PM</p><p>%s</p><div>Subtotal</div><div>$30.00</div><div>Delivery Fee</div><div>$2.99</div><div>$0.00</div><div>DoorDash Credits</div><div>-$5.00</div><div>Total</div><div>%s</div><div>Payment</div><div>$99.99</div><button onclick="print()">Download receipt</button></main>`,
 			when.Format("Monday, January 2, 2006"), store, total)
 	})
 	// Past orders like Uber Eats': a receipt is a pop-up on the same page with the document in a frame.
@@ -138,19 +138,19 @@ if (location.hash !== '#again') localStorage.setItem('seen', '1');</script>`)
 	mux.HandleFunc("/ubereats", func(w http.ResponseWriter, r *http.Request) {
 		receipt := ""
 		if r.URL.Query().Get("modctx") != "" {
-			total, cash, card := "$47.80", "$15.00", "$32.80"
+			total, cash, card := "$40.00", "$15.00", "$25.00"
 			if r.URL.Query().Get("modctx") == "u2" {
 				total, cash, card = "$20.00", "$0.00", "$20.00"
 			}
-			doc := fmt.Sprintf(`<html><body><p>%s</p><h1>Thanks for ordering</h1><div>Total</div><div>%s</div><div>Item Subtotal</div><div>$34.99</div><div>Payments</div><div>Uber Cash</div><div>%s</div><div>Visa 5993</div><div>%s</div><div>Order Details</div></body></html>`,
+			doc := fmt.Sprintf(`<html><body><p>%s</p><h1>Thanks for ordering</h1><div>Total</div><div>%s</div><div>Item Subtotal</div><div>$30.00</div><div>Payments</div><div>Uber Cash</div><div>%s</div><div>Card 0000</div><div>%s</div><div>Order Details</div></body></html>`,
 				ueNow.Format("Jan 2, 2006"), total, cash, card)
 			receipt = `<div role="dialog" aria-modal="true" style="position:fixed;top:5px;left:5px;width:600px;height:500px;background:#fff"><p>Receipt</p><iframe style="width:560px;height:400px" srcdoc="` +
 				strings.ReplaceAll(doc, `"`, "&quot;") + `"></iframe><button>Close</button></div>`
 		}
 		fmt.Fprintf(w, `<title>Past Orders</title><main><h1>Past Orders</h1>
-<div><a href="/store/b">Bagara's</a><div>1 item for $47.80</div><div>•</div><div>%s at 12:43 PM</div><div>•</div><a href="/ubereats?mod=orderReceipt&modctx=u1">View receipt</a></div>
-<div><a href="/store/d">Dish N Dash</a><div>2 items for $20.00</div><div>•</div><div>%s at 11:00 AM</div><div>•</div><a href="/ubereats?mod=orderReceipt&modctx=u2">View receipt</a></div>
-<div><a href="/store/x">Fire Wings</a><div>1 item for $0.00</div><div>•</div><div>Canceled on %s at 8:10 PM</div><div>•</div><a href="/ubereats?mod=orderReceipt&modctx=u3">View receipt</a></div>
+<div><a href="/store/b">Example Grill</a><div>1 item for $40.00</div><div>•</div><div>%s at 12:00 PM</div><div>•</div><a href="/ubereats?mod=orderReceipt&modctx=u1">View receipt</a></div>
+<div><a href="/store/d">Sample Diner</a><div>2 items for $20.00</div><div>•</div><div>%s at 11:00 AM</div><div>•</div><a href="/ubereats?mod=orderReceipt&modctx=u2">View receipt</a></div>
+<div><a href="/store/x">Test Wings</a><div>1 item for $0.00</div><div>•</div><div>Canceled on %s at 8:10 PM</div><div>•</div><a href="/ubereats?mod=orderReceipt&modctx=u3">View receipt</a></div>
 </main>%s`, ueNow.Format("Jan 02"), ueNow.Format("Jan 02"), ueNow.Format("Jan 02"), receipt)
 	})
 	// A sign-in form inside the shadow tree of a web component, as component frameworks build them.
@@ -165,9 +165,9 @@ customElements.define('x-login', class extends HTMLElement { connectedCallback()
 		fmt.Fprintf(w, `<title>Bill And Payment History</title><main><h1>Billing and payment history</h1><div id="rows"></div>
 <span>Jump to</span> <button role="combobox" id="box" onclick="document.getElementById('opts').hidden = false">1</button>
 <div id="opts" role="listbox" hidden><div role="option" onclick="go(0)">1</div><div role="option" onclick="go(1)">2</div></div> of 2</main><script>
-const bills = [['11/13/%d', '$199.47'], ['10/14/%d', '$122.05'], ['04/15/%d', '$-184.48'], ['12/15/%d', '$301.59']];
+const bills = [['11/10/%d', '$190.00'], ['10/10/%d', '$120.00'], ['04/10/%d', '$-180.00'], ['12/10/%d', '$300.00']];
 function go(n) { document.getElementById('opts').hidden = true; document.getElementById('box').innerText = n + 1;
-  document.getElementById('rows').innerHTML = '<div><span>11/17/%d</span> <span>Payment</span> <span>Processed</span> <span>$199.47</span></div>' +
+  document.getElementById('rows').innerHTML = '<div><span>11/12/%d</span> <span>Payment</span> <span>Processed</span> <span>$190.00</span></div>' +
     bills.slice(n * 2, n * 2 + 2).map((b, i) => '<div><span>' + b[0] + '</span> <span>Bill Charges</span> <a href="javascript:void(0)" onclick="view(' + (n * 2 + i) + ')">View Bill PDF</a> <span>' + b[1] + '</span></div>').join(''); }
 function view(i) { const url = URL.createObjectURL(new Blob(['%%PDF-1.7 statement ' + bills[i][0]], {type: 'application/pdf'})); window.open(url, '_blank'); }
 go(0);</script>`, ueNow.Year(), ueNow.Year(), ueNow.Year(), ueNow.Year()-1, ueNow.Year())
@@ -261,10 +261,10 @@ func TestBrowseEndToEnd(t *testing.T) {
 	_, got := run("click", num(home, "Orders & Purchases"))
 	wants(got, `Clicked link "Orders & Purchases".`, "Page: Orders", "03/14/2025 CMND PICT STRP $15.99")
 	// Buttons with the same name say which entry they belong to, and a pop-up is read on its own.
-	wants(got, `button "View Receipt" (for: 12/27/2025 Total $117.25)`, `button "View Receipt" (for: 12/21/2025 Total $77.92)`)
-	receipt := regexp.MustCompile(`\[(\d+)\] button "View Receipt" \(for: 12/27/2025`).FindStringSubmatch(got)
+	wants(got, `button "View Receipt" (for: 12/28/2025 Total $110.00)`, `button "View Receipt" (for: 12/20/2025 Total $70.00)`)
+	receipt := regexp.MustCompile(`\[(\d+)\] button "View Receipt" \(for: 12/28/2025`).FindStringSubmatch(got)
 	_, got = run("click", receipt[1])
-	wants(got, "A pop-up is open", "CHERRIES 9.99", `button "Close"`)
+	wants(got, "A pop-up is open", "APPLES 5.00", `button "Close"`)
 	if strings.Contains(got, "CMND PICT STRP") || strings.Contains(got, `"View Receipt" (for`) {
 		t.Errorf("with a pop-up open, only the pop-up is shown:\n%s", got)
 	}
@@ -351,18 +351,18 @@ func TestBrowseEndToEnd(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("costco-receipt last 2025: %d %s", code, got)
 	}
-	wants(got, "Verdict: FOUND. The last Costco warehouse receipt of 2025: the receipt of 12/27/2025 03:16pm, ALMADEN, total $117.25.",
-		"CHERRIES 9.99 TOTAL $117.25", "PDF SENT to Chinmay")
-	if sentPDF, _ := os.ReadFile(gotFile); string(sentPDF) != "Costco receipt, 12/27/2025 03:16pm, ALMADEN, total $117.25|%PDF-" {
+	wants(got, "Verdict: FOUND. The last Costco warehouse receipt of 2025: the receipt of 12/28/2025 03:00pm, NORTHTOWN, total $110.00.",
+		"APPLES 5.00 TOTAL $110.00", "PDF SENT to Chinmay")
+	if sentPDF, _ := os.ReadFile(gotFile); string(sentPDF) != "Costco receipt, 12/28/2025 03:00pm, NORTHTOWN, total $110.00|%PDF-" {
 		t.Errorf("the owner must get the receipt as a PDF, got %q", sentPDF)
 	}
-	_, got = run("costco-receipt", "12/21/2025", "--no-send")
-	wants(got, "receipt of 12/21/2025 02:32pm, SAN JOSE, total $77.92", "NOT sent", "File: ")
+	_, got = run("costco-receipt", "12/20/2025", "--no-send")
+	wants(got, "receipt of 12/20/2025 02:30pm, EASTSIDE, total $70.00", "NOT sent", "File: ")
 	_, got = run("costco-receipt", "03/03/2025")
 	wants(got, "Verdict: NOT FOUND", "costco-receipts 2025")
 	_, got = run("costco-receipts", "2025")
-	wants(got, "Verdict: 3 Costco warehouse receipts dated 2025, newest first:", "- 12/27/2025 03:16pm, ALMADEN, total $117.25",
-		"- 12/21/2025 02:32pm, SAN JOSE, total $77.92", "- 11/30/2025 09:00am, ALMADEN, total $20.00")
+	wants(got, "Verdict: 3 Costco warehouse receipts dated 2025, newest first:", "- 12/28/2025 03:00pm, NORTHTOWN, total $110.00",
+		"- 12/20/2025 02:30pm, EASTSIDE, total $70.00", "- 11/30/2025 09:00am, NORTHTOWN, total $20.00")
 	if strings.Contains(got, "2026,") || strings.Contains(got, "/2026 ") {
 		t.Errorf("receipts of another year must not be listed:\n%s", got)
 	}
@@ -393,7 +393,7 @@ func TestBrowseEndToEnd(t *testing.T) {
 		}
 		log, _ := os.ReadFile(sentLog)
 		joblog, _ := os.ReadFile(filepath.Join(os.Getenv("NOVEE_BROWSE_DIR"), "costco-job.log"))
-		m := regexp.MustCompile(`(?m)^Costco 2025: 3 warehouse receipts and 1 online orders, 10/10/2025 to 12/27/2025, oldest first\.\|(.+\.pdf)$`).FindStringSubmatch(string(log))
+		m := regexp.MustCompile(`(?m)^Costco 2025: 3 warehouse receipts and 1 online orders, 10/10/2025 to 12/28/2025, oldest first\.\|(.+\.pdf)$`).FindStringSubmatch(string(log))
 		if m == nil || strings.Count(string(log), ".pdf") != 1 {
 			t.Fatalf("the owner must get exactly one PDF, for 2025:\n%s\njob log:\n%s", log, joblog)
 		}
@@ -409,16 +409,16 @@ func TestBrowseEndToEnd(t *testing.T) {
 	t.Setenv("NOVEE_DOORDASH_URL", srv.URL+"/doordash")
 	now, old := time.Now(), time.Now().AddDate(-1, 1, 0)
 	_, got = run("doordash-receipts", fmt.Sprint(old.Year()))
-	wants(got, "- "+old.Format("01/02/2006")+", Dunkin', total $18.90")
+	wants(got, "- "+old.Format("01/02/2006")+", Test Bakery, total $9.50")
 	_, got = run("doordash-receipt", "last", "--no-send")
-	wants(got, "Verdict: FOUND. The last DoorDash order of "+fmt.Sprint(now.Year())+": the receipt of "+now.Format("01/02/2006")+" 08:19pm, Mehak of India, total $16.20.",
+	wants(got, "Verdict: FOUND. The last DoorDash order of "+fmt.Sprint(now.Year())+": the receipt of "+now.Format("01/02/2006")+" 08:00pm, Example Curry House, total $12.00.",
 		"DoorDash Credits", "File: ")
 	_, got = run("doordash-receipt", now.Format("01/02/2006"))
 	wants(got, "Verdict: 2 DoorDash orders on "+now.Format("01/02/2006"), "novee-browse doordash-receipt "+now.Format("01/02/2006")+"  #2")
 	_, got = run("doordash-receipt", now.Format("01/02/2006"), "#2", "--no-send")
-	wants(got, "Chaat Cafe, total $27.60")
-	_, got = run("doordash-receipt", now.Format("01/02/2006"), "chaat", "--no-send")
-	wants(got, "Chaat Cafe, total $27.60", "File: ")
+	wants(got, "Sample Noodle Bar, total $23.00")
+	_, got = run("doordash-receipt", now.Format("01/02/2006"), "noodle", "--no-send")
+	wants(got, "Sample Noodle Bar, total $23.00", "File: ")
 	// A "download" button that only prints is answered with the printed page.
 	_, got = run("snapshot")
 	_, got = run("download", num(got, "Download receipt"))
@@ -438,12 +438,12 @@ func TestBrowseEndToEnd(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 		}
 		spent, _ := os.ReadFile(sentLog)
-		wantLines := []string{"DoorDash Spending Breakdown - " + fmt.Sprint(now.Year()), now.Format("January") + " (so far)\n• Orders: 2\n• Spent: $53.80\n• Card $43.80 + credits $10.00",
+		wantLines := []string{"DoorDash Spending Breakdown - " + fmt.Sprint(now.Year()), now.Format("January") + " (so far)\n• Orders: 2\n• Spent: $45.00\n• Card $35.00 + credits $10.00",
 			"DoorDash credits check\n• Used on food and grocery: ", "show no DoorDash gift cards"}
 		if now.Year() == old.Year() { // the third order is in the same year, in another month
-			wantLines = append(wantLines, "Total "+fmt.Sprint(now.Year())+"\n• Orders: 3\n• Spent: $77.70\n• Card $62.70 + credits $15.00")
+			wantLines = append(wantLines, "Total "+fmt.Sprint(now.Year())+"\n• Orders: 3\n• Spent: $59.50\n• Card $44.50 + credits $15.00")
 		} else {
-			wantLines = append(wantLines, "Total "+fmt.Sprint(now.Year())+"\n• Orders: 2\n• Spent: $53.80\n• Card $43.80 + credits $10.00")
+			wantLines = append(wantLines, "Total "+fmt.Sprint(now.Year())+"\n• Orders: 2\n• Spent: $45.00\n• Card $35.00 + credits $10.00")
 		}
 		for _, w := range wantLines {
 			if !strings.Contains(string(spent), w) {
@@ -477,18 +477,18 @@ func TestBrowseEndToEnd(t *testing.T) {
 	fakeText := filepath.Join(t.TempDir(), "pdftotext")
 	// The stand-in "reads" a PDF by printing a statement dated like the file is named.
 	script := "#!/bin/sh\nd=$(basename \"$2\" .pdf); y=${d%%-*}; md=${d#*-}; m=${md%-*}; dd=${md#*-}\n" +
-		"printf ' Statement Date:    %s/%s/%s\\n Due Date:     12/04/2026\\n Your Account Summary\\n  Amount Due on Previous Statement      $1.00\\n" +
-		"  Current PG&E Electric Monthly Charges      $24.23\\n  Current Gas Charges      160.73\\n  Total Amount Due by 12/04/2026      $184.96\\n\\f Details of Gas Charges\\n" +
-		"10/08/2026 to 11/05/2026 (29 billing days)\\n      Total Usage      53.000000 Therms\\nTier 1 Usage      11.760000 Therms@ $2.42480      $28.52\\nTotal Gas Charges      $160.73\\n' \"$m\" \"$dd\" \"$y\"\n"
+		"printf ' Statement Date:    %s/%s/%s\\n Due Date:     12/01/2026\\n Your Account Summary\\n  Amount Due on Previous Statement      $1.00\\n" +
+		"  Current PG&E Electric Monthly Charges      $20.00\\n  Current Gas Charges      150.00\\n  Total Amount Due by 12/01/2026      $170.00\\n\\f Details of Gas Charges\\n" +
+		"10/01/2026 to 10/30/2026 (30 billing days)\\n      Total Usage      50.000000 Therms\\nTier 1 Usage      10.000000 Therms@ $2.00000      $20.00\\nTotal Gas Charges      $150.00\\n' \"$m\" \"$dd\" \"$y\"\n"
 	if err := os.WriteFile(fakeText, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("NOVEE_PDFTOTEXT", fakeText)
 	_, got = run("pge-bills")
-	wants(got, "Verdict: 3 PG&E statements dated "+fmt.Sprint(now.Year()), "- 11/13/"+fmt.Sprint(now.Year())+": $199.47", "- 04/15/"+fmt.Sprint(now.Year())+": $-184.48")
+	wants(got, "Verdict: 3 PG&E statements dated "+fmt.Sprint(now.Year()), "- 11/10/"+fmt.Sprint(now.Year())+": $190.00", "- 04/10/"+fmt.Sprint(now.Year())+": $-180.00")
 	_, got = run("pge-bill", "04/"+fmt.Sprint(now.Year()), "--no-send")
-	wants(got, "Verdict: FOUND. PG&E statement of 04/15/"+fmt.Sprint(now.Year()), "Electric, PG&E charges: $24.23", "Gas 10/08 to 11/05 (29 days): $160.73 for 53 therms",
-		"Tier 1 Usage: 11.8 therms at $2.42/therm = $28.52", "NOT sent", "File: ")
+	wants(got, "Verdict: FOUND. PG&E statement of 04/10/"+fmt.Sprint(now.Year()), "Electric, PG&E charges: $20.00", "Gas 10/01 to 10/30 (30 days): $150.00 for 50 therms",
+		"Tier 1 Usage: 10.0 therms at $2.00/therm = $20.00", "NOT sent", "File: ")
 	if in, ok := session.Current(); ok && len(session.Tabs(in)) != 1 {
 		t.Errorf("the tab the PDF opened in must be closed again: %v", session.Tabs(in))
 	}
@@ -507,8 +507,8 @@ func TestBrowseEndToEnd(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 		}
 		rep, _ := os.ReadFile(pgeSent)
-		for _, w := range []string{"PG&E Bills - " + fmt.Sprint(now.Year()), "3 statements", "November (statement 11/13)\n• Charges: $184.96\n• Electric, PG&E: $24.23\n• Gas: $160.73 (53 therms)",
-			"Total " + fmt.Sprint(now.Year()) + "\n• Charges: $554.88", "PG&E Gas - " + fmt.Sprint(now.Year()), "• Tier 1: $2.42 per therm", "PGE-bills-" + fmt.Sprint(now.Year()) + ".csv"} {
+		for _, w := range []string{"PG&E Bills - " + fmt.Sprint(now.Year()), "3 statements", "November (statement 11/10)\n• Charges: $170.00\n• Electric, PG&E: $20.00\n• Gas: $150.00 (50 therms)",
+			"Total " + fmt.Sprint(now.Year()) + "\n• Charges: $510.00", "PG&E Gas - " + fmt.Sprint(now.Year()), "• Tier 1: $2.00 per therm", "PGE-bills-" + fmt.Sprint(now.Year()) + ".csv"} {
 			if !strings.Contains(string(rep), w) {
 				t.Errorf("the PG&E report lacks %q:\n%s", w, rep)
 			}
@@ -519,9 +519,9 @@ func TestBrowseEndToEnd(t *testing.T) {
 	// Uber Eats: the receipt is a framed document in a pop-up, and Uber Cash is the credit.
 	t.Setenv("NOVEE_UBEREATS_URL", srv.URL+"/ubereats")
 	_, got = run("ubereats-receipts")
-	wants(got, "Verdict: 3 Uber Eats orders dated", "Bagara's, total $47.80", "Fire Wings, cancelled")
+	wants(got, "Verdict: 3 Uber Eats orders dated", "Example Grill, total $40.00", "Test Wings, cancelled")
 	_, got = run("ubereats-receipt", "last", "--no-send")
-	wants(got, "Verdict: FOUND. The last Uber Eats order of "+fmt.Sprint(now.Year()), "12:43pm, Bagara's, total $47.80", "Uber Cash", "File: ")
+	wants(got, "Verdict: FOUND. The last Uber Eats order of "+fmt.Sprint(now.Year()), "12:00pm, Example Grill, total $40.00", "Uber Cash", "File: ")
 	if strings.Contains(got, "Past Orders") {
 		t.Errorf("the receipt text must be the pop-up's, not the page behind it:\n%s", got)
 	}
@@ -540,8 +540,8 @@ func TestBrowseEndToEnd(t *testing.T) {
 			time.Sleep(500 * time.Millisecond)
 		}
 		spent, _ := os.ReadFile(ueSent)
-		for _, w := range []string{"Uber Eats Spending Breakdown - " + fmt.Sprint(now.Year()), "• Orders: 2\n• Spent: $67.80\n• Card $52.80 + Uber Cash $15.00",
-			"Not counted, cancelled:\n• " + now.Format("01/02") + " Fire Wings", "Uber Cash check", "UberEats-spending-"} {
+		for _, w := range []string{"Uber Eats Spending Breakdown - " + fmt.Sprint(now.Year()), "• Orders: 2\n• Spent: $60.00\n• Card $45.00 + Uber Cash $15.00",
+			"Not counted, cancelled:\n• " + now.Format("01/02") + " Test Wings", "Uber Cash check", "UberEats-spending-"} {
 			if !strings.Contains(string(spent), w) {
 				t.Errorf("the Uber Eats report lacks %q:\n%s", w, spent)
 			}

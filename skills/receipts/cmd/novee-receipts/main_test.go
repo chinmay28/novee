@@ -65,7 +65,7 @@ func TestSearchAnswers(t *testing.T) {
 	// flags may come after the words, the way a person or a small model writes them
 	_, got := run(t, e, out, "search", "3m", "command", "hanging", "strips", "--price", "10-20", "--store", "costco")
 	wants(t, got, "Verdict: NOT FOUND", "Partial matches",
-		"- 2025-03-14, TESTVILLE #470: item 1370476 CMND PICT STRP, $15.99, coupon -$4.00, paid $11.99 [receipt 21047001102482503141503]",
+		"- 2025-03-14, TESTVILLE #999: item 1234567 CMND PICT STRP, $15.99, coupon -$4.00, paid $11.99 [receipt 21099901102482503141503]",
 		"Words found on no receipt line: 3m, hanging.", "Not searched: purchases before 2025-03-14")
 
 	_, got = run(t, e, out, "search", "command", "strips")
@@ -80,8 +80,8 @@ func TestSearchAnswers(t *testing.T) {
 	_, got = run(t, e, out, "search", "mattress")
 	wants(t, got, "line price not reported (order total $787.97)", "[receipt online-1234567890]")
 
-	_, got = run(t, e, out, "search", "--price", "13.61")
-	wants(t, got, "NOT FOUND. No line matches all of unit price $13.61")
+	_, got = run(t, e, out, "search", "--price", "12.34")
+	wants(t, got, "NOT FOUND. No line matches all of unit price $12.34")
 
 	_, got = run(t, e, out, "search", "umbrella", "--year", "2019")
 	wants(t, got, "CANNOT ANSWER")

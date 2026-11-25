@@ -21,7 +21,7 @@ func TestSimilar(t *testing.T) {
 		{"spinach", "spinich", true}, // typo
 		{"3m", "3m", true},
 		{"3m", "3mm", false},         // short codes: exact only
-		{"1370476", "137047", false}, // numbers: exact only
+		{"1234567", "137047", false}, // numbers: exact only
 		{"command", "coconut", false},
 		{"hook", "hang", false},
 		{"milk", "mlk", true},
@@ -47,8 +47,8 @@ func fixture() []receipt.Receipt {
 		{Store: "costco", ID: "a", When: d("2024-01-05"), Lines: []receipt.Line{
 			line("1", "ORG SPINACH", 449), line("2", "COCONUT WATER", 1359), line("3", "A2 MILK", 1369)}},
 		{Store: "costco", ID: "b", When: d("2025-03-14"), Lines: []receipt.Line{
-			line("1370476", "CMND PICT STRP", 1599),
-			{Item: "9", Name: "/1370476", Amount: -400, Priced: true, DiscountFor: "1370476"},
+			line("1234567", "CMND PICT STRP", 1599),
+			{Item: "9", Name: "/1234567", Amount: -400, Priced: true, DiscountFor: "1234567"},
 			{Item: "4", Name: "KS TORTELLON", Amount: 2198, Priced: true, Qty: 2}}},
 		{Store: "costco", ID: "c", When: d("2026-10-10"), Kind: receipt.KindOnline, Lines: []receipt.Line{
 			{Item: "5", Name: "Command Large Wire Hooks"}}},
@@ -81,13 +81,13 @@ func TestFind(t *testing.T) {
 		q             Query
 		full, partial []string
 	}{
-		{"abbreviated name, all words", Query{Text: "command picture strips"}, []string{"b:1370476"}, []string{"c:5"}},
-		{"extra words fall back to partial, closest spelling first", Query{Text: "3m command hanging assortment"}, nil, []string{"c:5", "b:1370476"}},
-		{"item number as a word", Query{Text: "1370476"}, []string{"b:1370476"}, nil},
-		{"item filter", Query{Item: "1370476"}, []string{"b:1370476"}, nil},
+		{"abbreviated name, all words", Query{Text: "command picture strips"}, []string{"b:1234567"}, []string{"c:5"}},
+		{"extra words fall back to partial, closest spelling first", Query{Text: "3m command hanging assortment"}, nil, []string{"c:5", "b:1234567"}},
+		{"item number as a word", Query{Text: "1234567"}, []string{"b:1234567"}, nil},
+		{"item filter", Query{Item: "1234567"}, []string{"b:1234567"}, nil},
 		{"price band only", Query{Min: c(1300), Max: c(1400)}, []string{"a:2", "a:3"}, nil},
 		{"price is per unit", Query{Text: "tortellini", Min: c(1000), Max: c(1200)}, []string{"b:4"}, nil},
-		{"unpriced lines never pass a price filter", Query{Text: "command", Min: c(1), Max: c(99999)}, []string{"b:1370476"}, nil},
+		{"unpriced lines never pass a price filter", Query{Text: "command", Min: c(1), Max: c(99999)}, []string{"b:1234567"}, nil},
 		{"nothing", Query{Text: "umbrella"}, nil, nil},
 	} {
 		res := Find(fixture(), tc.q)

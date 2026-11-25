@@ -85,7 +85,7 @@ Run one command at a time. Never guess a number; if the thing you want is not li
 Do not click through Costco's receipt pages yourself. These commands do it:
 
 - `novee-browse costco-receipt last 2025`: the newest warehouse receipt of that year. Without a year: of this year.
-- `novee-browse costco-receipt 12/27/2025`: the receipt of that day.
+- `novee-browse costco-receipt 03/14/2025`: the receipt of that day.
 - `novee-browse costco-receipts 2025`: every warehouse receipt of the year, with date, warehouse and total.
 
 - `novee-browse costco-year-pdf all` (or `costco-year-pdf 2025`, or `costco-year-pdf 2024 2025`): ONE PDF per calendar year holding every original receipt of that year, warehouse receipts and online orders, oldest first. Use it for "consolidated receipts", "all my receipts", "merge the receipts by year". It starts a background job (about 5 minutes per year) that sends Chinmay the finished PDFs itself; nothing else is sent. `costco-year-pdf status` says how far it is, `costco-year-pdf stop` ends it.
@@ -104,7 +104,7 @@ Never loop over `costco-receipt` to collect many receipts: each run sends Chinma
 ## DoorDash receipts: the same, with `doordash`
 
 - `novee-browse doordash-receipt last` (or `last 2025`): the newest order, its receipt text, and the PDF sent to Chinmay.
-- `novee-browse doordash-receipt 11/15/2026`: the order of that day. If there were several, the output lists them with the exact command for each; ask Chinmay which, or add the store name: `novee-browse doordash-receipt 11/15/2026 mehak`.
+- `novee-browse doordash-receipt 03/14/2025`: the order of that day. If there were several, the output lists them with the exact command for each; ask Chinmay which, or add the store name: `novee-browse doordash-receipt 03/14/2025 curry`.
 - `novee-browse doordash-receipts 2026`: every order of the year with date, store and total.
 - `novee-browse doordash-year-pdf all` (or a year): one PDF per calendar year with every receipt, made by a background job that sends the files itself. About 15 minutes per year.
 
@@ -118,7 +118,7 @@ The answers read the same as Costco's (`Verdict:`, `PDF SENT`, `NOT sent`, `STAR
 
 ## Uber Eats: the same, with `ubereats`
 
-- `novee-browse ubereats-receipt last` (or `last 2025`, or `11/11/2026`, with a store name if there were several that day): the receipt text and the PDF sent to Chinmay.
+- `novee-browse ubereats-receipt last` (or `last 2025`, or `03/14/2025`, with a store name if there were several that day): the receipt text and the PDF sent to Chinmay.
 - `novee-browse ubereats-receipts 2026`: every order of the year with date, store and total; cancelled orders are marked.
 - `novee-browse ubereats-year-pdf all` (or a year): one PDF per calendar year, by a background job.
 - `novee-browse ubereats-spending 2026`: the spending report, like DoorDash's. Here "spent" is the receipt total, split into what a card paid and what Uber Cash paid. Uber Cash is not given a gift card price, because it also comes from card benefits and promotions; Uber gift cards bought at Costco are listed.
@@ -127,7 +127,7 @@ Signing in to Uber asks for a phone number or e-mail and then a code, not always
 
 ## PG&E energy statements
 
-- `novee-browse pge-bill last` (or `pge-bill 11/13/2026`, or a month: `pge-bill 11/2026`): one statement read in full. PG&E's electric charges line by line, the generation charges of the community provider with their rates per kWh, electricity taken from and sent to the grid, the net energy metering (NEM) detail with peak and off-peak rates and credits, the estimated true-up, and gas use with the rate per therm of each tier. The PDF is sent to Chinmay.
+- `novee-browse pge-bill last` (or `pge-bill 03/14/2025`, or a month: `pge-bill 03/2025`): one statement read in full. PG&E's electric charges line by line, the generation charges of the community provider with their rates per kWh, electricity taken from and sent to the grid, the net energy metering (NEM) detail with peak and off-peak rates and credits, the estimated true-up, and gas use with the rate per therm of each tier. The PDF is sent to Chinmay.
 - `novee-browse pge-bills 2026`: the statements of a year with their amounts.
 - `novee-browse pge-report 2026`: the year analysed and sent to Chinmay by the tool, with a file that has one line per statement. Three parts: the bills month by month (charges, electric, generation, gas, corrections, climate credit); electricity and solar (from grid, to grid, net, rates, NEM charges and credits per period, the year-to-date NEM table and the estimate owed at the true-up); gas (therms, therms a day, cost per therm, tier rates). A background job; a few minutes the first time for a year.
 

@@ -33,7 +33,7 @@ func TestParseWarehouse(t *testing.T) {
 		t.Fatalf("got %d receipts, want the 3 usable ones", len(rs))
 	}
 	r := rs[0]
-	if r.ID != "21047001102482503141503" || r.Kind != receipt.KindWarehouse || r.Location != "TESTVILLE #470" {
+	if r.ID != "21099901102482503141503" || r.Kind != receipt.KindWarehouse || r.Location != "TESTVILLE #999" {
 		t.Errorf("header: %+v", r)
 	}
 	if got := r.When.Format("2006-01-02 15:04"); got != "2025-03-14 15:03" {
@@ -42,14 +42,14 @@ func TestParseWarehouse(t *testing.T) {
 	if r.Total != 4906 || r.Tax != 110 || r.Subtotal != 4796 {
 		t.Errorf("totals: %v %v %v", r.Subtotal, r.Tax, r.Total)
 	}
-	if l := r.Lines[0]; l.Item != "1370476" || l.Name != "CMND PICT STRP" || l.Amount != 1599 || !l.Priced || l.DiscountFor != "" {
+	if l := r.Lines[0]; l.Item != "1234567" || l.Name != "CMND PICT STRP" || l.Amount != 1599 || !l.Priced || l.DiscountFor != "" {
 		t.Errorf("line 0: %+v", l)
 	}
-	if l := r.Lines[1]; l.DiscountFor != "1370476" || l.Amount != -400 {
+	if l := r.Lines[1]; l.DiscountFor != "1234567" || l.Amount != -400 {
 		t.Errorf("coupon row: %+v", l)
 	}
-	if r.Discount("1370476") != -400 {
-		t.Errorf("discount = %v", r.Discount("1370476"))
+	if r.Discount("1234567") != -400 {
+		t.Errorf("discount = %v", r.Discount("1234567"))
 	}
 	if l := r.Lines[2]; l.Qty != 2 || l.Detail != "FIVE CHEESE" {
 		t.Errorf("line 2: %+v", l)
@@ -66,7 +66,7 @@ func TestParseWarehouse(t *testing.T) {
 	if !rs[1].IsReturn() {
 		t.Error("negative total must be a return")
 	}
-	if rs[2].Kind != receipt.KindGas || rs[2].ID != "470-51-77-20250403T0800" {
+	if rs[2].Kind != receipt.KindGas || rs[2].ID != "999-51-77-20250403T0800" {
 		t.Errorf("gas receipt without a barcode: kind %q id %q", rs[2].Kind, rs[2].ID)
 	}
 	for _, r := range rs {

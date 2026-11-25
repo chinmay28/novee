@@ -262,7 +262,7 @@ func (a *app) costcoReceipts(ctx context.Context, args []string) (int, error) {
 // costcoReceipt opens one warehouse receipt, prints it, saves it as a PDF and
 // sends the PDF to the owner.
 func (a *app) costcoReceipt(ctx context.Context, args []string) (int, error) {
-	const usage = "usage: costco-receipt last [YEAR]  or  costco-receipt MM/DD/YYYY. Examples: costco-receipt last 2025, costco-receipt 12/27/2025"
+	const usage = "usage: costco-receipt last [YEAR]  or  costco-receipt MM/DD/YYYY. Examples: costco-receipt last 2025, costco-receipt 03/14/2025"
 	fs := flag.NewFlagSet("costco-receipt", flag.ContinueOnError)
 	noSend := fs.Bool("no-send", false, "")
 	pos, err := parse(fs, args)

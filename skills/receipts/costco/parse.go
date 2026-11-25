@@ -141,7 +141,7 @@ func ParseWarehouse(data json.RawMessage) ([]receipt.Receipt, error) {
 			if it.Amount != nil {
 				l.Amount, l.Priced = receipt.FromFloat(float64(*it.Amount)), true
 			}
-			// A coupon prints as a row named "/1370476" with a negative amount.
+			// A coupon prints as a row named "/1234567" with a negative amount.
 			if m := discountRow.FindStringSubmatch(l.Name); m != nil && l.Amount < 0 {
 				l.DiscountFor = m[1]
 			}
